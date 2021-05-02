@@ -6,31 +6,165 @@ from os.path import splitext
 
 from django.apps import apps
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.db.models import Q
 from django.utils import timezone
 
 import requests
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action, api_view
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.models import TokenUser
 
-from . import defaults, permissions, serializers
-from .exceptions import MissingUserIdError
+from . import defaults, forms, permissions, serializers
 from .lti import LTIUser
-from .models import Document, Thumbnail, TimedTextTrack, Video
+from .models import Document, Organization, Playlist, Thumbnail, TimedTextTrack, Video
 from .utils.api_utils import validate_signature
 from .utils.medialive_utils import (
     create_live_stream,
+    create_mediapackage_harvest_job,
+    delete_aws_element_stack,
     start_live_channel,
     stop_live_channel,
 )
 from .utils.s3_utils import create_presigned_post
 from .utils.time_utils import to_timestamp
+from .utils.xmpp_utils import close_room, create_room
 from .xapi import XAPI, XAPIStatement
 
 
 logger = logging.getLogger(__name__)
+
+
+class ObjectPkMixin:
+    """
+    Get the object primary key from the URL path.
+
+    This is useful to avoid making extra requests using view.get_object() on
+    a ViewSet when we only need the object's id, which is available in the URL.
+    """
+
+    def get_object_pk(self):
+        """Get the object primary key from the URL path."""
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        return self.kwargs.get(lookup_url_kwarg)
+
+
+class UserViewSet(viewsets.GenericViewSet):
+    """ViewSet for all user-related interactions."""
+
+    serializer_class = serializers.UserSerializer
+
+    @action(detail=False, permission_classes=[])
+    def whoami(self, request):
+        """
+        Get information on the current user.
+
+        This is the only implemented user-related endpoint.
+        """
+        # If the user is not logged in, the request has no object. Return a 401 so the caller
+        # knows they need to log in first.
+        if (
+            not request.user.is_authenticated
+            or (request.user.id is None)
+            or (request.user.id == "None")
+        ):
+            return Response(status=401)
+
+        # Get an actual user object from the TokenUser id
+        # pylint: disable=invalid-name
+        User = get_user_model()
+        try:
+            user = User.objects.prefetch_related(
+                "organization_accesses", "organization_accesses__organization"
+            ).get(id=request.user.id)
+        except User.DoesNotExist:
+            return Response(status=401)
+
+        return Response(data=self.get_serializer(user).data)
+
+
+class OrganizationViewSet(ObjectPkMixin, viewsets.ModelViewSet):
+    """ViewSet for all organization-related interactions."""
+
+    permission_classes = [permissions.NotAllowed]
+    queryset = Organization.objects.all()
+    serializer_class = serializers.OrganizationSerializer
+
+    def get_permissions(self):
+        """
+        Manage permissions for built-in DRF methods.
+
+        Default to the actions' self defined permissions if applicable or
+        to the ViewSet's default permissions.
+        """
+        if self.action in ["retrieve"]:
+            permission_classes = [permissions.IsOrganizationAdmin]
+        else:
+            try:
+                permission_classes = getattr(self, self.action).kwargs.get(
+                    "permission_classes"
+                )
+            except AttributeError:
+                permission_classes = self.permission_classes
+        return [permission() for permission in permission_classes]
+
+
+class PlaylistViewSet(ObjectPkMixin, viewsets.ModelViewSet):
+    """ViewSet for all playlist-related interactions."""
+
+    permission_classes = [permissions.NotAllowed]
+    queryset = Playlist.objects.all()
+    serializer_class = serializers.PlaylistSerializer
+
+    def get_permissions(self):
+        """
+        Manage permissions for built-in DRF methods.
+
+        Default to the actions' self defined permissions if applicable or
+        to the ViewSet's default permissions.
+        """
+        if self.action in ["list"]:
+            permission_classes = [IsAuthenticated]
+        elif self.action in ["retrieve"]:
+            permission_classes = [
+                permissions.IsPlaylistAdmin | permissions.IsPlaylistOrganizationAdmin
+            ]
+        elif self.action in ["create"]:
+            permission_classes = [permissions.IsParamsOrganizationAdmin]
+        else:
+            try:
+                permission_classes = getattr(self, self.action).kwargs.get(
+                    "permission_classes"
+                )
+            except AttributeError:
+                permission_classes = self.permission_classes
+        return [permission() for permission in permission_classes]
+
+    def list(self, request, *args, **kwargs):
+        """
+        Return a list of playlists.
+
+        By default, filtered to only return to the user what
+        playlists they have access to.
+        """
+        queryset = self.get_queryset().filter(
+            organization__users__id=self.request.user.id
+        )
+
+        organization_id = self.request.query_params.get("organization")
+        if organization_id:
+            queryset = queryset.filter(organization__id=organization_id)
+
+        page = self.paginate_queryset(queryset.order_by("title"))
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset.order_by("title"), many=True)
+        return Response(serializer.data)
 
 
 @api_view(["POST"])
@@ -68,8 +202,10 @@ def update_state(request):
     model = apps.get_model(app_label="core", model_name=key_elements["model_name"])
 
     extra_parameters = serializer.validated_data["extraParameters"]
-    if serializer.validated_data["state"] == defaults.READY and hasattr(
-        model, "extension"
+    if (
+        serializer.validated_data["state"] == defaults.READY
+        and hasattr(model, "extension")
+        and "extension" not in extra_parameters
     ):
         # The extension is part of the s3 key name and added in this key
         # when generated by the initiate upload
@@ -83,7 +219,7 @@ def update_state(request):
     object_instance.update_upload_state(
         upload_state=serializer.validated_data["state"],
         uploaded_on=key_elements.get("uploaded_on")
-        if serializer.validated_data["state"] == defaults.READY
+        if serializer.validated_data["state"] in [defaults.READY, defaults.HARVESTED]
         else None,
         **extra_parameters,
     )
@@ -91,16 +227,45 @@ def update_state(request):
     return Response({"success": True})
 
 
-class VideoViewSet(
-    mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.GenericViewSet
-):
+class VideoViewSet(viewsets.ModelViewSet):
     """Viewset for the API of the video object."""
 
     queryset = Video.objects.all()
     serializer_class = serializers.VideoSerializer
-    permission_classes = [
-        permissions.IsResourceAdmin | permissions.IsResourceInstructor
-    ]
+    permission_classes = [permissions.NotAllowed]
+
+    def get_permissions(self):
+        """
+        Manage permissions for built-in DRF methods.
+
+        Default to the actions' self defined permissions if applicable or
+        to the ViewSet's default permissions.
+        """
+        if self.action in ["retrieve", "partial_update", "update"]:
+            permission_classes = [
+                permissions.IsResourceAdmin | permissions.IsResourceInstructor
+            ]
+        elif self.action in ["list"]:
+            permission_classes = [IsAuthenticated]
+        elif self.action in ["create"]:
+            permission_classes = [
+                permissions.IsParamsPlaylistAdmin
+                | permissions.IsParamsPlaylistAdminThroughOrganization
+            ]
+        elif self.action in ["destroy"]:
+            permission_classes = [
+                permissions.IsVideoPlaylistAdmin | permissions.IsVideoOrganizationAdmin
+            ]
+        else:
+            try:
+                permission_classes = (
+                    getattr(self, self.action).kwargs.get("permission_classes")
+                    if self.action
+                    else self.permission_classes
+                )
+            except AttributeError:
+                permission_classes = self.permission_classes
+        return [permission() for permission in permission_classes]
 
     def get_serializer_context(self):
         """Extra context provided to the serializer class."""
@@ -108,9 +273,60 @@ class VideoViewSet(
         # The API is only reachable by admin users.
         context["can_return_live_info"] = True
 
+        user = self.request.user
+        if isinstance(user, TokenUser):
+            context["roles"] = user.token.payload.get("roles", [])
+            context["user_id"] = user.token.payload.get("user_id", None)
+
         return context
 
-    @action(methods=["post"], detail=True, url_path="initiate-upload")
+    def create(self, request, *args, **kwargs):
+        """Create one video based on the request payload."""
+        try:
+            form = forms.VideoForm(request.data)
+            video = form.save()
+        except ValueError:
+            return Response({"errors": [dict(form.errors)]}, status=400)
+
+        serializer = self.get_serializer(video)
+
+        return Response(serializer.data, status=201)
+
+    def list(self, request, *args, **kwargs):
+        """List videos through the API."""
+        # Limit the queryset to the playlists the user has access directly or through
+        # an access they have to an organization
+        queryset = self.get_queryset().filter(
+            Q(playlist__user_accesses__user__id=request.user.id)
+            | Q(playlist__organization__user_accesses__user__id=request.user.id)
+        )
+
+        playlist = request.query_params.get("playlist")
+        if playlist is not None:
+            queryset = queryset.filter(playlist__id=playlist)
+
+        organization = request.query_params.get("organization")
+        if organization is not None:
+            queryset = queryset.filter(playlist__organization__id=organization)
+
+        queryset = queryset.order_by("title")
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(
+        methods=["post"],
+        detail=True,
+        url_path="initiate-upload",
+        permission_classes=[
+            permissions.IsResourceAdmin | permissions.IsResourceInstructor
+        ],
+    )
     # pylint: disable=unused-argument
     def initate_upload(self, request, pk=None):
         """Get an upload policy for a video.
@@ -151,9 +367,20 @@ class VideoViewSet(
 
         return Response(presigned_post)
 
-    @action(methods=["post"], detail=True, url_path="initiate-live")
+    @action(
+        methods=["post"],
+        detail=True,
+        url_path="initiate-live",
+        permission_classes=[
+            permissions.IsResourceAdmin | permissions.IsResourceInstructor
+        ],
+    )
     # pylint: disable=unused-argument
-    def initiate_live(self, request, pk=None):
+    def initiate_live(
+        self,
+        request,
+        pk=None,
+    ):
         """Create a live stack on AWS ready to stream.
 
         Parameters
@@ -179,7 +406,7 @@ class VideoViewSet(
         Video.objects.filter(pk=pk).update(
             live_info=live_info,
             upload_state=defaults.PENDING,
-            live_state=defaults.IDLE,
+            live_state=defaults.CREATING,
             uploaded_on=None,
         )
 
@@ -188,7 +415,14 @@ class VideoViewSet(
 
         return Response(serializer.data)
 
-    @action(methods=["post"], detail=True, url_path="start-live")
+    @action(
+        methods=["post"],
+        detail=True,
+        url_path="start-live",
+        permission_classes=[
+            permissions.IsResourceAdmin | permissions.IsResourceInstructor
+        ],
+    )
     # pylint: disable=unused-argument
     def start_live(self, request, pk=None):
         """Start a medialive channel on AWS.
@@ -221,6 +455,8 @@ class VideoViewSet(
             )
 
         start_live_channel(video.live_info.get("medialive").get("channel").get("id"))
+        if settings.LIVE_CHAT_ENABLED:
+            create_room(video.id)
 
         video.live_state = defaults.STARTING
         video.save()
@@ -228,7 +464,14 @@ class VideoViewSet(
 
         return Response(serializer.data)
 
-    @action(methods=["post"], detail=True, url_path="stop-live")
+    @action(
+        methods=["post"],
+        detail=True,
+        url_path="stop-live",
+        permission_classes=[
+            permissions.IsResourceAdmin | permissions.IsResourceInstructor
+        ],
+    )
     # pylint: disable=unused-argument
     def stop_live(self, request, pk=None):
         """Stop a medialive channel on AWS.
@@ -260,7 +503,7 @@ class VideoViewSet(
 
         stop_live_channel(video.live_info.get("medialive").get("channel").get("id"))
 
-        video.live_state = defaults.STOPPED
+        video.live_state = defaults.STOPPING
         video.save()
         serializer = self.get_serializer(video)
 
@@ -273,7 +516,11 @@ class VideoViewSet(
         permission_classes=[],
     )
     # pylint: disable=unused-argument
-    def update_live_state(self, request, pk=None):
+    def update_live_state(
+        self,
+        request,
+        pk=None,
+    ):
         """View handling AWS POST request to update the video live state.
 
         Parameters
@@ -290,6 +537,8 @@ class VideoViewSet(
             HttpResponse acknowledging the success or failure of the live state update operation.
 
         """
+        now = timezone.now()
+        stamp = to_timestamp(now)
         msg = request.body
         serializer = serializers.UpdateLiveStateSerializer(data=request.data)
 
@@ -300,13 +549,42 @@ class VideoViewSet(
         if not validate_signature(request.headers.get("X-Marsha-Signature"), msg):
             return Response("Forbidden", status=403)
 
+        # Load the video first to return a 404 if not existing
         video = self.get_object()
-        video.live_state = serializer.validated_data["state"]
+
+        # Try to update the video with the new live state. If the video has already this live state
+        # we are in a concurrent request and only the first one should be accepted.
+        updated_rows = Video.objects.filter(
+            ~Q(live_state=serializer.validated_data["state"]),
+            pk=video.pk,
+        ).update(live_state=serializer.validated_data["state"])
+
+        if updated_rows == 0:
+            # State was alreay updated by an earlier request, we can stop the process here
+            # If we return a status different than 200 the lambda will retry
+            # to update the live state several times.
+            return Response({"success": True})
+
+        video.refresh_from_db()
+
         live_info = video.live_info
         live_info.update(
             {"cloudwatch": {"logGroupName": serializer.validated_data["logGroupName"]}}
         )
-        video.live_info = live_info
+
+        if video.live_state == defaults.RUNNING:
+            live_info.update({"started_at": stamp})
+            video.live_info = live_info
+
+        if video.live_state == defaults.STOPPED:
+            live_info.update({"stopped_at": stamp})
+            video.upload_state = defaults.HARVESTING
+            video.live_info = live_info
+            create_mediapackage_harvest_job(video)
+            delete_aws_element_stack(video)
+            if settings.LIVE_CHAT_ENABLED:
+                close_room(video.id)
+
         video.save()
 
         return Response({"success": True})
@@ -371,14 +649,7 @@ class DocumentViewSet(
         return Response(presigned_post)
 
 
-class TimedTextTrackViewSet(
-    mixins.CreateModelMixin,
-    mixins.DestroyModelMixin,
-    mixins.ListModelMixin,
-    mixins.RetrieveModelMixin,
-    mixins.UpdateModelMixin,
-    viewsets.GenericViewSet,
-):
+class TimedTextTrackViewSet(viewsets.ModelViewSet):
     """Viewset for the API of the TimedTextTrack object."""
 
     serializer_class = serializers.TimedTextTrackSerializer
@@ -542,17 +813,13 @@ class XAPIStatementView(APIView):
 
         # xapi statement sent by the client but incomplete
         partial_xapi_statement = serializers.XAPIStatementSerializer(data=request.data)
-
         if not partial_xapi_statement.is_valid():
             return Response(partial_xapi_statement.errors, status=400)
 
-        try:
-            # xapi statement enriched with video and lti_user informations
-            xapi_statement = XAPIStatement(
-                video, partial_xapi_statement.validated_data, lti_user
-            )
-        except MissingUserIdError:
-            return Response({"status": "Impossible to identify the actor."}, status=400)
+        # xapi statement enriched with video and lti_user informations
+        xapi_statement = XAPIStatement(
+            video, partial_xapi_statement.validated_data, lti_user
+        )
 
         # Log the statement in the xapi logger
         xapi_logger.info(json.dumps(xapi_statement.get_statement()))

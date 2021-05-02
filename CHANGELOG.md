@@ -10,13 +10,160 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Chat feature implementing XMPP protocol
+- Add a prosody server in docker-compose stack
+- Add a LTI select view to allow LTI consumers to add a LTI content through Deep Linking
+- Display chat box without video player
+- Add a tests.utils module to share LTI request signature and refactor related tests
+
+### Changed
+
+- The `lti_id` field is optional on Videos and Documents.
+- Clean built frontend files before each build
+
+### Fixed
+
+- Frontend video type now allows Nullable urls.
+- Fix js public path on LTI select view.
+
+## [3.17.1] - 2021-03-26
+
+### Added
+
+- Add a series of components to power breadcrumbs.
+- Add a frontend component to use SVG icons in Marsha.
+- Add ngrok to serve marsha on a public domain and automate CloudFront configuration
+  via terraform when needed
+
+### Fixed
+
+- Avoid blank page when feature flags are not set.
+
+### Changed
+
+- Use a new `<UploadManager />` for uploads to prepare a common tool
+  between the LTI app and the Marsha site.
+
+## [3.17.0] - 2021-03-04
+
+### Added
+
+- Create a new lambda (lamba-mediapackage) called when an harvest job is done
+- Create a harvest job when a live is ended
+- Component to switch a live to VOD
+- Switch to enable sentry in front application
+- Management command checking live stuck in IDLE
+- Add new live state CREATING
+- Open retrieve endpoints for organizations & playlists
+
+### Changed
+
+- Medialive profiles use 24FPS instead of 30
+- Increase Medialive profiles segment to 4 seconds
+- Increase Mediapackage endpoint segment to 4 seconds
+- Rollback Medialive control rate mode to CBR
+- Static files are managed using whitenoise
+
+### Fixed
+
+- Display higher resolution thumbnail available
+
+## [3.16.1] - 2021-02-23
+
+### Fixed
+
+- Disable native audio and video tracks in Videojs conf
+- Remove HLS source in <VideoPlayer />
+
+## [3.16.0] - 2021-02-17
+
+### Added
+
+- Create a videojs plugin to manage MP4 selection
+- Create a CRUD video management site for Marsha, only open
+  in development until release.
+
+### Changed
+
+- Enable videojs useDevicePixelRatio VHS option
+- Update the frontend <Loader /> with a <Spinner /> sidekick and
+  make some accessibility improvements.
+
+## [3.15.0] - 2021-02-04
+
+### Changed
+
+- Switch to QVBR rate control mode in live profiles
+
+### Fixed
+
+- Handle Django ValidationError as an accepted exception
+
+### Removed
+
+- Dash endpoint in mediapackage channel
+- Useless medialive profiles
+- All dash usage
+
+## [3.14.0] - 2020-12-22
+
+### Added
+
+- Publicly access video or document, bypassing LTI check
+
+### Fixed
+
+- revert removal of mediaconvert presets configuration
+- use absolute path to register presets in lambda-configure function
+
+## [3.13.1] - 2020-12-15
+
+### Fixed
+
+- Enable videojs override native feature except on safari
+
+## [3.13.0] - 2020-12-02
+
+### Added
+
+- Choose video player with the setting VIDEO_PLAYER
+- New player videojs as an alternative to plyr
+- Add a fleature flag to control video live streams activation
+
+### Changed
+
+- Dockerize lambda functions
+
+## [3.12.1] - 2020-11-25
+
+### Fixed
+
+- Allow to serialize a timed text track without extension
+
+## [3.12.0] - 2020-11-24
+
+### Added
+
 - Manage live streaming using AWS Elemental
+- Download timed text track in video dashboard
+- Create shared resources between terraform workspaces
+
+### Changed
+
+- use input to execute lambda_migrate intead of env var
+- copy document from s3 source to s3 destination in lambda copying document
+
+### Fixed
+
+- manage ready clauses in LTI resource finder
+- Change preset container by CMFC
 
 ## [3.11.0] - 2020-10-08
 
 ### Changed
 
 - Rework front i18n workflow
+- docker image use python 3.9
 
 ### Removed
 
@@ -54,7 +201,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - Use `UploadableFileMixin` on `AbstractImage` model
-- Fix dashboard read versus update permissions in situations 
+- Fix dashboard read versus update permissions in situations
   of playlist portability
 
 ## [3.9.1] - 2020-06-24
@@ -68,7 +215,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Detect original video framerate and use it in lambda encode
-- Limit video encoding resolution to that of the source 
+- Limit video encoding resolution to that of the source
 
 ## [3.8.1] - 2020-05-18
 
@@ -138,7 +285,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- New setting MAINTENANCE_MODE to disable the dashboard when Marsha is 
+- New setting MAINTENANCE_MODE to disable the dashboard when Marsha is
   in maintenance
 
 ### Changed
@@ -588,7 +735,16 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Minor fixes and improvements on features and tests
 
-[unreleased]: https://github.com/openfun/marsha/compare/v3.11.0...master
+[unreleased]: https://github.com/openfun/marsha/compare/v3.17.0...master
+[3.17.0]: https://github.com/openfun/marsha/compare/v3.16.1...v3.17.0
+[3.16.1]: https://github.com/openfun/marsha/compare/v3.16.0...v3.16.1
+[3.16.0]: https://github.com/openfun/marsha/compare/v3.15.0...v3.16.0
+[3.15.0]: https://github.com/openfun/marsha/compare/v3.14.0...v3.15.0
+[3.14.0]: https://github.com/openfun/marsha/compare/v3.13.1...v3.14.0
+[3.13.1]: https://github.com/openfun/marsha/compare/v3.13.0...v3.13.1
+[3.13.0]: https://github.com/openfun/marsha/compare/v3.12.1...v3.13.0
+[3.12.1]: https://github.com/openfun/marsha/compare/v3.12.0...v3.12.1
+[3.12.0]: https://github.com/openfun/marsha/compare/v3.11.0...v3.12.0
 [3.11.0]: https://github.com/openfun/marsha/compare/v3.10.2...v3.11.0
 [3.10.2]: https://github.com/openfun/marsha/compare/v3.10.1...v3.10.2
 [3.10.1]: https://github.com/openfun/marsha/compare/v3.10.0...v3.10.1

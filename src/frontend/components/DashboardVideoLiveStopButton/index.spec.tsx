@@ -5,9 +5,10 @@ import { ImportMock } from 'ts-mock-imports';
 
 import * as useVideoModule from '../../data/stores/useVideo';
 import { uploadState, liveState } from '../../types/tracks';
+import { videoMockFactory } from '../../utils/tests/factories';
 import { wrapInIntlProvider } from '../../utils/tests/intl';
 import { wrapInRouter } from '../../utils/tests/router';
-import { ERROR_COMPONENT_ROUTE } from '../ErrorComponent/route';
+import { FULL_SCREEN_ERROR_ROUTE } from '../ErrorComponents/route';
 import { DashboardVideoLiveStopButton } from '.';
 
 jest.mock('jwt-decode', () => jest.fn());
@@ -32,7 +33,7 @@ describe('components/DashboardVideoLiveStopButton', () => {
 
   afterAll(useVideoStub.restore);
 
-  const video = {
+  const video = videoMockFactory({
     description: '',
     has_transcript: false,
     id: 'f0e4835f-f126-457e-8e27-16898cd0b5d5',
@@ -44,7 +45,6 @@ describe('components/DashboardVideoLiveStopButton', () => {
     upload_state: uploadState.PENDING,
     urls: {
       manifests: {
-        dash: 'https://example.com/dash',
         hls: 'https://example.com/hls',
       },
       mp4: {},
@@ -66,7 +66,7 @@ describe('components/DashboardVideoLiveStopButton', () => {
         },
       },
     },
-  };
+  });
 
   it('renders the stop button', () => {
     useVideoStub.returns({
@@ -97,7 +97,7 @@ describe('components/DashboardVideoLiveStopButton', () => {
       wrapInIntlProvider(
         wrapInRouter(<DashboardVideoLiveStopButton video={video} />, [
           {
-            path: ERROR_COMPONENT_ROUTE('liveInit'),
+            path: FULL_SCREEN_ERROR_ROUTE('liveInit'),
             render: () => <span>error</span>,
           },
         ]),

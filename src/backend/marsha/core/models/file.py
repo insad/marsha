@@ -72,6 +72,8 @@ class BaseFile(UploadableFileMixin, BaseModel):
         max_length=255,
         verbose_name=_("lti id"),
         help_text=_("ID for synchronization with an external LTI tool"),
+        blank=True,
+        null=True,
     )
     created_by = models.ForeignKey(
         to=User,
@@ -146,6 +148,12 @@ class Document(BaseFile):
         verbose_name=_("extension"),
     )
 
+    is_public = models.BooleanField(
+        default=False,
+        verbose_name=_("is document public"),
+        help_text=_("Is the document publicly accessible?"),
+    )
+
     class Meta:
         """Options for the ``Document`` model."""
 
@@ -213,6 +221,19 @@ class Document(BaseFile):
         """
         self.extension = extra_parameters.get("extension")
         super().update_upload_state(upload_state, uploaded_on, **extra_parameters)
+
+    @staticmethod
+    def get_ready_clause():
+        """Clause used in lti.utils.get_or_create_resource to filter the documents.
+
+        Only show documents that have successfully gone through the upload process.
+
+        Returns
+        -------
+        models.Q
+            A condition added to a QuerySet
+        """
+        return models.Q(uploaded_on__isnull=False)
 
 
 class AbstractImage(UploadableFileMixin, BaseModel):

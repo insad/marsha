@@ -4,6 +4,7 @@ Uses django-configurations to manage environments inheritance and the loading of
 config from the environment
 
 """
+# pylint: disable=abstract-class-instantiated
 
 from datetime import timedelta
 import json
@@ -53,7 +54,6 @@ class Base(Configuration):
     # Static files (CSS, JavaScript, Images)
     STATICFILES_DIRS = (os.path.join(BASE_DIR, "static"),)
     STATIC_URL = "/static/"
-    ABSOLUTE_STATIC_URL = STATIC_URL
     MEDIA_URL = "/media/"
     # Allow to configure location of static/media files for non-Docker installation
     MEDIA_ROOT = values.Value(os.path.join(str(DATA_DIR), "media"))
@@ -110,12 +110,14 @@ class Base(Configuration):
         "django.contrib.staticfiles",
         "django_extensions",
         "dockerflow.django",
+        "waffle",
         "rest_framework",
         "marsha.core.apps.CoreConfig",
     ]
 
     MIDDLEWARE = [
         "django.middleware.security.SecurityMiddleware",
+        "whitenoise.middleware.WhiteNoiseMiddleware",
         "django.contrib.sessions.middleware.SessionMiddleware",
         "django.middleware.common.CommonMiddleware",
         "django.middleware.csrf.CsrfViewMiddleware",
@@ -123,6 +125,7 @@ class Base(Configuration):
         "django.contrib.messages.middleware.MessageMiddleware",
         "django.middleware.clickjacking.XFrameOptionsMiddleware",
         "dockerflow.django.middleware.DockerflowMiddleware",
+        "waffle.middleware.WaffleMiddleware",
     ]
 
     ROOT_URLCONF = "marsha.urls"
@@ -150,8 +153,14 @@ class Base(Configuration):
     REST_FRAMEWORK = {
         "DEFAULT_AUTHENTICATION_CLASSES": (
             "rest_framework_simplejwt.authentication.JWTTokenUserAuthentication",
-        )
+        ),
+        "EXCEPTION_HANDLER": "marsha.core.views.exception_handler",
+        "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
+        "PAGE_SIZE": 50,
     }
+
+    # WAFFLE
+    WAFFLE_CREATE_MISSING_SWITCHES = True
 
     # Password validation
     # https://docs.djangoproject.com/en/2.0/ref/settings/#auth-password-validators
@@ -221,6 +230,7 @@ class Base(Configuration):
     UPDATE_STATE_SHARED_SECRETS = values.ListValue()
     AWS_UPLOAD_EXPIRATION_DELAY = values.Value(24 * 60 * 60)  # 24h
     AWS_MEDIALIVE_ROLE_ARN = values.SecretValue()
+    AWS_MEDIAPACKAGE_HARVEST_JOB_ARN = values.SecretValue()
 
     # Cloud Front key pair for signed urls
     CLOUDFRONT_ACCESS_KEY_ID = values.Value(None)
@@ -247,7 +257,23 @@ class Base(Configuration):
 
     EXTERNAL_JAVASCRIPT_SCRIPTS = values.ListValue([])
 
+    VIDEO_PLAYER = values.Value("videojs")
+
     MAINTENANCE_MODE = values.BooleanValue(False)
+    NB_DAYS_BEFORE_DELETING_LIVE_RECORDINGS = values.Value(14)
+    NB_DAYS_KEEPING_LIVE_IDLE = values.Value(7)
+
+    # XMPP Settings
+    LIVE_CHAT_ENABLED = values.BooleanValue(False)
+    XMPP_BOSH_URL = values.Value(None)
+    XMPP_CONFERENCE_DOMAIN = values.Value(None)
+    XMPP_PRIVATE_ADMIN_JID = values.Value(None)
+    XMPP_PRIVATE_SERVER_PORT = values.Value(5222)
+    XMPP_PRIVATE_SERVER_PASSWORD = values.Value(None)
+    XMPP_JWT_SHARED_SECRET = values.Value(None)
+    XMPP_JWT_ISSUER = values.Value("marsha")
+    XMPP_JWT_AUDIENCE = values.Value("marsha")
+    XMPP_DOMAIN = values.Value(None)
 
     # pylint: disable=invalid-name
     @property
@@ -259,6 +285,19 @@ class Base(Configuration):
         """
         return os.environ.get(
             "DJANGO_AWS_SOURCE_BUCKET_NAME", f"{self.AWS_BASE_NAME}-marsha-source"
+        )
+
+    # pylint: disable=invalid-name
+    @property
+    def AWS_DESTINATION_BUCKET_NAME(self):
+        """Destination bucket name.
+
+        If this setting is set in an environment variable we use it. Otherwise
+        the value is computed with the AWS_BASE_NAME value.
+        """
+        return os.environ.get(
+            "DJANGO_AWS_DESTINATION_BUCKET_NAME",
+            f"{self.AWS_BASE_NAME}-marsha-destination",
         )
 
     # pylint: disable=invalid-name
@@ -325,11 +364,29 @@ class Base(Configuration):
                 scope.set_extra("application", "backend")
 
 
+class Build(Base):
+    """Settings used when the application is built.
+
+    This environment should not be used to run the application. Just to build it with non blocking
+    settings.
+    """
+
+    ALLOWED_HOSTS = None
+    AWS_ACCESS_KEY_ID = values.Value("")
+    AWS_SECRET_ACCESS_KEY = values.Value("")
+    AWS_BASE_NAME = values.Value("")
+    AWS_MEDIALIVE_ROLE_ARN = values.Value("")
+    AWS_MEDIAPACKAGE_HARVEST_JOB_ARN = values.Value("")
+    SECRET_KEY = values.Value("DummyKey")
+    STATICFILES_STORAGE = values.Value(
+        "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    )
+
+
 class Development(Base):
     """Development environment settings.
 
-    We set ``DEBUG`` to ``True`` by default, configure the server to respond to all hosts,
-    and use a local sqlite database by default.
+    We set ``DEBUG`` to ``True`` by default, configure the server to respond to all hosts.
     """
 
     ALLOWED_HOSTS = ["*"]
@@ -379,6 +436,9 @@ class Test(Base):
 
     CLOUDFRONT_SIGNED_URLS_ACTIVE = False
     AWS_BASE_NAME = values.Value("test")
+    # Enable it to speed up tests by stopping WhiteNoise from scanning your static files
+    WHITENOISE_AUTOREFRESH = True
+    LIVE_CHAT_ENABLED = False
 
 
 class Production(Base):
@@ -392,54 +452,20 @@ class Production(Base):
 
     ALLOWED_HOSTS = values.ListValue(None)
 
-    # For static files in production, we want to use a backend that includes a hash in
-    # the filename, that is calculated from the file content, so that browsers always
-    # get the updated version of each file.
     STATICFILES_STORAGE = values.Value(
-        "marsha.core.storage.ConfigurableManifestS3Boto3Storage"
+        "whitenoise.storage.CompressedManifestStaticFilesStorage"
     )
 
-    # The mapping between the names of the original files and the names of the files distributed
-    # by the backend is stored in a file.
-    # The best practice is to allow this manifest file's name to change for each deployment so
-    # that several versions of the app can run in parallel without interfering with each other.
-    # We make it configurable so that it can be versioned with a deployment stamp in your CI/CD:
-    STATICFILES_MANIFEST_NAME = values.Value("staticfiles.json")
-
-    AWS_S3_OBJECT_PARAMETERS = {
-        "Expires": "Thu, 31 Dec 2099 20:00:00 GMT",
-        "CacheControl": "max-age=94608000",
-    }
     AWS_BASE_NAME = values.Value("production")
-
-    # folder where static will be stored. It matches the path_pattern used
-    # in the cloudfront configuration.
-    AWS_LOCATION = Base.STATIC_URL.lstrip("/")
-
-    # pattern matching files to ignore when hashing file names and exclude from the
-    # static files manifest
-    STATIC_POSTPROCESS_IGNORE_REGEX = values.Value(r"^js\/[0-9]*\..*\.index\.js$")
 
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
 
     # pylint: disable=invalid-name
     @property
-    def ABSOLUTE_STATIC_URL(self):
+    def STATIC_URL(self):
         """Compute the absolute static url used in the lti template."""
-        return f"//{self.CLOUDFRONT_DOMAIN}{self.STATIC_URL}"
-
-    # pylint: disable=invalid-name
-    @property
-    def AWS_STATIC_BUCKET_NAME(self):
-        """AWS Static bucket name.
-
-        If this setting is set in an environment variable we use it. Otherwise
-        the value is computed with the AWS_BASE_NAME value.
-        """
-        return os.environ.get(
-            "DJANGO_AWS_STATIC_BUCKET_NAME", f"{self.AWS_BASE_NAME}-marsha-static"
-        )
+        return f"//{self.CLOUDFRONT_DOMAIN}/static/"
 
 
 class Staging(Production):

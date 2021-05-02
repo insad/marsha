@@ -1,3 +1,28 @@
+
+# Global policy added to all lambda to access ECR image
+resource "aws_iam_policy" "lambda_ecr_access_policy" {
+  name        = "${terraform.workspace}-marsha-lambda-ecr-access-policy"
+  path        = "/"
+  description = "IAM policy needed by all lambda to access ECR"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": [
+        "ecr:SetRepositoryPolicy",
+        "ecr:GetRepositoryPolicy"
+      ],
+      "Effect": "Allow",
+      "Resource": "${var.ecr_lambda_marsha_arn}/"
+    }
+  ]
+}
+EOF
+}
+
+
 # Lambda invocation role
 #########################
 
@@ -18,6 +43,11 @@ resource "aws_iam_role" "lambda_invocation_role" {
   ]
 }
 EOF
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_invocation_ecr_policy_attachment" {
+  role       = aws_iam_role.lambda_invocation_role.name
+  policy_arn = aws_iam_policy.lambda_ecr_access_policy.arn
 }
 
 resource "aws_iam_policy" "lambda_logging_policy" {
@@ -44,8 +74,8 @@ EOF
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_logging_policy_attachment" {
-  role       = "${aws_iam_role.lambda_invocation_role.name}"
-  policy_arn = "${aws_iam_policy.lambda_logging_policy.arn}"
+  role       = aws_iam_role.lambda_invocation_role.name
+  policy_arn = aws_iam_policy.lambda_logging_policy.arn
 }
 
 resource "aws_iam_policy" "lambda_media_convert_policy" {
@@ -74,8 +104,8 @@ EOF
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_media_convert_policy_attachment" {
-  role       = "${aws_iam_role.lambda_invocation_role.name}"
-  policy_arn = "${aws_iam_policy.lambda_media_convert_policy.arn}"
+  role       = aws_iam_role.lambda_invocation_role.name
+  policy_arn = aws_iam_policy.lambda_media_convert_policy.arn
 }
 
 resource "aws_iam_policy" "lambda_pass_role_policy" {
@@ -98,8 +128,8 @@ EOF
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_pass_role_policy_attachment" {
-  role       = "${aws_iam_role.lambda_invocation_role.name}"
-  policy_arn = "${aws_iam_policy.lambda_pass_role_policy.arn}"
+  role       = aws_iam_role.lambda_invocation_role.name
+  policy_arn = aws_iam_policy.lambda_pass_role_policy.arn
 }
 
 resource "aws_iam_policy" "lambda_s3_access_policy" {
@@ -129,8 +159,8 @@ EOF
 # `lambda-encode` needs read access to the source bucket and write access to the destination
 # bucket to read timed text files from the former and write them to the latter.
 resource "aws_iam_role_policy_attachment" "lambda_s3_access_policy_attachment" {
-  role        = "${aws_iam_role.lambda_invocation_role.name}"
-  policy_arn  = "${aws_iam_policy.lambda_s3_access_policy.arn}"
+  role        = aws_iam_role.lambda_invocation_role.name
+  policy_arn  = aws_iam_policy.lambda_s3_access_policy.arn
 }
 
 # Media Convert role
@@ -180,8 +210,8 @@ EOF
 }
 
 resource "aws_iam_role_policy_attachment" "media_convert_s3_policy_attachment" {
-  role       = "${aws_iam_role.media_convert_role.name}"
-  policy_arn = "${aws_iam_policy.media_convert_s3_policy.arn}"
+  role       = aws_iam_role.media_convert_role.name
+  policy_arn = aws_iam_policy.media_convert_s3_policy.arn
 }
 
 # Event rule role
@@ -228,8 +258,8 @@ EOF
 }
 
 resource "aws_iam_role_policy_attachment" "event_rule_lambda_invoke_policy_attachment" {
-  role       = "${aws_iam_role.event_rule_role.name}"
-  policy_arn = "${aws_iam_policy.event_rule_lambda_invoke_policy.arn}"
+  role       = aws_iam_role.event_rule_role.name
+  policy_arn = aws_iam_policy.event_rule_lambda_invoke_policy.arn
 }
 
 # Migrate lambda role
@@ -255,8 +285,13 @@ EOF
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_migrate_logging_policy_attachment" {
-  role       = "${aws_iam_role.lambda_migrate_invocation_role.name}"
-  policy_arn = "${aws_iam_policy.lambda_logging_policy.arn}"
+  role       = aws_iam_role.lambda_migrate_invocation_role.name
+  policy_arn = aws_iam_policy.lambda_logging_policy.arn
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_migrate_ecr_policy_attachment" {
+  role       = aws_iam_role.lambda_migrate_invocation_role.name
+  policy_arn = aws_iam_policy.lambda_ecr_access_policy.arn
 }
 
 resource "aws_iam_policy" "lambda_migrate_s3_access_policy" {
@@ -279,8 +314,8 @@ EOF
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_migrate_s3_access_policy_attachment" {
-  role        = "${aws_iam_role.lambda_migrate_invocation_role.name}"
-  policy_arn  = "${aws_iam_policy.lambda_migrate_s3_access_policy.arn}"
+  role        = aws_iam_role.lambda_migrate_invocation_role.name
+  policy_arn  = aws_iam_policy.lambda_migrate_s3_access_policy.arn
 }
 
 resource "aws_iam_policy" "lambda_migrate_lambda_invoke_policy" {
@@ -306,8 +341,8 @@ EOF
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_migrate_lambda_invoke_policy_attachment" {
-  role        = "${aws_iam_role.lambda_migrate_invocation_role.name}"
-  policy_arn  = "${aws_iam_policy.lambda_migrate_lambda_invoke_policy.arn}"
+  role        = aws_iam_role.lambda_migrate_invocation_role.name
+  policy_arn  = aws_iam_policy.lambda_migrate_lambda_invoke_policy.arn
 }
 
 # MediaLive role
@@ -355,92 +390,12 @@ EOF
 }
 
 resource "aws_iam_role_policy_attachment" "medialive_ssm_access_policy_attachment" {
-  role        = "${aws_iam_role.medialive_access_role.name}"
-  policy_arn  = "${aws_iam_policy.ssm_read_only.arn}"
+  role        = aws_iam_role.medialive_access_role.name
+  policy_arn  = aws_iam_policy.ssm_read_only.arn
 }
 
-
-resource "aws_iam_policy" "medialive_custom_policy" {
-  name        = "${terraform.workspace}-marsha-medialive-custom-policy"
-  path        = "/"
-  description = "IAM policy needed to use medialive"
-
-  policy = <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "s3:ListBucket",
-                "s3:PutObject",
-                "s3:GetObject",
-                "s3:DeleteObject"
-            ],
-            "Resource": "*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "mediastore:ListContainers",
-                "mediastore:PutObject",
-                "mediastore:GetObject",
-                "mediastore:DeleteObject",
-                "mediastore:DescribeObject"
-            ],
-            "Resource": "*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "logs:CreateLogGroup",
-                "logs:CreateLogStream",
-                "logs:PutLogEvents",
-                "logs:DescribeLogStreams",
-                "logs:DescribeLogGroups"
-            ],
-            "Resource": "arn:aws:logs:*:*:*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "mediaconnect:ManagedDescribeFlow",
-                "mediaconnect:ManagedAddOutput",
-                "mediaconnect:ManagedRemoveOutput"
-            ],
-            "Resource": "*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "ec2:describeSubnets",
-                "ec2:describeNetworkInterfaces",
-                "ec2:createNetworkInterface",
-                "ec2:createNetworkInterfacePermission",
-                "ec2:deleteNetworkInterface",
-                "ec2:deleteNetworkInterfacePermission",
-                "ec2:describeSecurityGroups"
-            ],
-            "Resource": "*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "mediapackage:DescribeChannel"
-            ],
-            "Resource": "*"
-        }
-    ]
-}
-EOF
-}
-
-resource "aws_iam_role_policy_attachment" "medialive_custom_policy_attachment" {
-  role        = "${aws_iam_role.medialive_access_role.name}"
-  policy_arn  = "${aws_iam_policy.medialive_custom_policy.arn}"
-}
-
-
+# Medialive lambda role
+#####################
 resource "aws_iam_role" "lambda_medialive_invocation_role" {
   name = "${terraform.workspace}-marsha-lambda-medialive-invocation-role"
 
@@ -462,22 +417,171 @@ EOF
 
 
 resource "aws_iam_role_policy_attachment" "lambda_medialive_logging_policy_attachment" {
-  role       = "${aws_iam_role.lambda_medialive_invocation_role.name}"
-  policy_arn = "${aws_iam_policy.lambda_logging_policy.arn}"
+  role       = aws_iam_role.lambda_medialive_invocation_role.name
+  policy_arn = aws_iam_policy.lambda_logging_policy.arn
 }
 
+resource "aws_iam_role_policy_attachment" "lambda_medialive_access_ecr_policy_attachment" {
+  role       = aws_iam_role.lambda_medialive_invocation_role.name
+  policy_arn = aws_iam_policy.lambda_ecr_access_policy.arn
+}
 
-resource "aws_iam_policy" "lambda_medialive_access_policy" {
-  name        = "${terraform.workspace}-marsha-medialive-access-policy"
+# Mediapackage harvest job role
+
+resource "aws_iam_role" "mediapackage_harvest_job_s3_role" {
+  name = "${terraform.workspace}-marsha-mediapackage-harvest-job-s3-role"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "mediapackage.amazonaws.com"
+      },
+      "Effect": "Allow"
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_policy" "mediapackage_harvest_job_s3_access_policy" {
+  name        = "${terraform.workspace}-marsha-mediapackage-harvest-job-s3-access-policy"
   path        = "/"
-  description = "IAM policy needed by lambda-medialive to access medialive"
+  description = "IAM policy to write in destination bucket from a mediapackage harvest job"
 
   policy = <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Action": ["medialive:describeChannel"],
+      "Action": [
+        "s3:PutObject",
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Effect": "Allow",
+      "Resource": [
+        "arn:aws:s3:::${aws_s3_bucket.marsha_destination.bucket}/*",
+        "arn:aws:s3:::${aws_s3_bucket.marsha_destination.bucket}"
+      ]
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_role_policy_attachment" "mediapackage_harvest_job_s3_policy_attachment" {
+  role       = aws_iam_role.mediapackage_harvest_job_s3_role.name
+  policy_arn = aws_iam_policy.mediapackage_harvest_job_s3_access_policy.arn
+}
+
+
+# Mediapackage lambda role
+#####################
+resource "aws_iam_role" "lambda_mediapackage_invocation_role" {
+  name = "${terraform.workspace}-marsha-lambda-mediapackage-invocation-role"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Effect": "Allow"
+    }
+  ]
+}
+EOF
+}
+
+
+resource "aws_iam_role_policy_attachment" "lambda_mediapackage_logging_policy_attachment" {
+  role       = aws_iam_role.lambda_mediapackage_invocation_role.name
+  policy_arn = aws_iam_policy.lambda_logging_policy.arn
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_mediapackage_access_ecr_policy_attachment" {
+  role       = aws_iam_role.lambda_mediapackage_invocation_role.name
+  policy_arn = aws_iam_policy.lambda_ecr_access_policy.arn
+}
+
+
+resource "aws_iam_policy" "lambda_mediapackage_s3_policy" {
+  name        = "${terraform.workspace}-mediapackage-s3-access-policy"
+  path        = "/"
+  description = "IAM policy to write in destination bucket from mediapackage lambda"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": [
+        "s3:PutObject",
+        "s3:getObject",
+        "s3:ListBucket"
+      ],
+      "Effect": "Allow",
+      "Resource": [
+        "arn:aws:s3:::${aws_s3_bucket.marsha_destination.bucket}/*"
+      ]
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_mediapackage_s3_policy_attachment" {
+  role       = aws_iam_role.lambda_mediapackage_invocation_role.name
+  policy_arn = aws_iam_policy.lambda_mediapackage_s3_policy.arn
+}
+
+resource "aws_iam_policy" "lambda_mediapackage_access_policy" {
+  name        = "${terraform.workspace}-mediapackage-access-policy"
+  path        = "/"
+  description = "IAM policy to write in destination bucket from mediapackage lambda"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "mediapackage:DeleteChannel",
+        "mediapackage:DeleteOriginEndpoint",
+        "mediapackage:DescribeOriginEndpoint"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+}
+
+
+resource "aws_iam_role_policy_attachment" "lambda_mediapackage_access_policy_attachment" {
+  role       = aws_iam_role.lambda_mediapackage_invocation_role.name
+  policy_arn = aws_iam_policy.lambda_mediapackage_access_policy.arn
+}
+
+resource "aws_iam_policy" "lambda_mediapackage_ecs_policy" {
+  name        = "${terraform.workspace}-marsha-mediapackage-ecs-policy"
+  path        = "/"
+  description = "IAM policy needed by lambda-mediapackage to run taks on ECS"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "ecs:RunTask",
       "Effect": "Allow",
       "Resource": "*"
     }
@@ -486,7 +590,134 @@ resource "aws_iam_policy" "lambda_medialive_access_policy" {
 EOF
 }
 
-resource "aws_iam_role_policy_attachment" "lambda_medialive_access_policy_attachment" {
-  role       = "${aws_iam_role.lambda_medialive_invocation_role.name}"
-  policy_arn = "${aws_iam_policy.lambda_medialive_access_policy.arn}"
+resource "aws_iam_role_policy_attachment" "lambda_mediapackage_ecs_policy_attachment" {
+  role       = aws_iam_role.lambda_mediapackage_invocation_role.name
+  policy_arn = aws_iam_policy.lambda_mediapackage_ecs_policy.arn
+}
+
+resource "aws_iam_policy" "lambda_mediapackage_pass_role_to_ecs_policy" {
+  name        = "${terraform.workspace}-marsha-lambda-mediapackage-pass-role-to-ecs-policy"
+  path        = "/"
+  description = "IAM policy for passing a role from a lambda"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": ["iam:PassRole"],
+      "Resource": "${aws_iam_role.ecs_task_ffmpeg_transmux_execution_role.arn}",
+      "Effect": "Allow"
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_mediapackage_pass_role_policy_to_ecs_attachment" {
+  role       = aws_iam_role.lambda_mediapackage_invocation_role.name
+  policy_arn = aws_iam_policy.lambda_mediapackage_pass_role_to_ecs_policy.arn
+}
+
+# ECS TASK DEFINITION
+#####################
+resource "aws_iam_role" "ecs_task_ffmpeg_transmux_execution_role" {
+  name = "${terraform.workspace}-ecs-task-ffmpeg-transmux-execution-role"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2008-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_policy" "ecs_task_ffmpeg_transmux_execution_role_policy" {
+  name        = "${terraform.workspace}-ecs-task-ffmpeg-transmux-execution-role-policy"
+  path        = "/"
+  description = "IAM policy needed by ECS to execute a task defintion"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecr:GetAuthorizationToken",
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:BatchGetImage",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_execution_attachment" {
+  role       = aws_iam_role.ecs_task_ffmpeg_transmux_execution_role.name
+  policy_arn = aws_iam_policy.ecs_task_ffmpeg_transmux_execution_role_policy.arn
+}
+
+resource "aws_iam_policy" "ecs_task_ffmpeg_transmux_upload_to_s3_policy" {
+  name        = "${terraform.workspace}-ecs-task-ffmpeg-transmux-upload-to-s3-policy"
+  path        = "/"
+  description = "IAM policy needed by ECS to upload on s3 from the transmuxing task"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+        "Effect": "Allow",
+        "Action": "s3:PutObject",
+        "Resource": "arn:aws:s3:::${aws_s3_bucket.marsha_destination.bucket}/*"
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_upload_to_s3_policy_attachment" {
+  role       = aws_iam_role.ecs_task_ffmpeg_transmux_execution_role.name
+  policy_arn = aws_iam_policy.ecs_task_ffmpeg_transmux_upload_to_s3_policy.arn
+}
+
+resource "aws_iam_policy" "ecs_task_ffmpeg_transmux_invoke_lambda_policy" {
+  name        = "${terraform.workspace}-ecs-task-ffmpeg-transmux-invoke-lambda-policy"
+  path        = "/"
+  description = "IAM policy needed by ECS to upload on s3 from the transmuxing task"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": [
+        "lambda:invokeAsync",
+        "lambda:invokeFunction"
+      ],
+      "Effect": "Allow",
+      "Resource": "${aws_lambda_function.marsha_mediapackage_lambda.arn}"
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_ffmpeg_transmux_invoke_lambda_policy_attachment" {
+  role       = aws_iam_role.ecs_task_ffmpeg_transmux_execution_role.name
+  policy_arn = aws_iam_policy.ecs_task_ffmpeg_transmux_invoke_lambda_policy.arn
 }

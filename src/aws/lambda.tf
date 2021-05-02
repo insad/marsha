@@ -1,42 +1,31 @@
-# Lambda Layers
-###############
-
-resource "aws_lambda_layer_version" "media_info_layer" {
-  filename    = "layers/MediaInfo_CLI_20.03.20200523_Lambda.zip"
-  source_code_hash = "${base64sha256(file("layers/MediaInfo_CLI_20.03.20200523_Lambda.zip"))}"
-  layer_name  = "media_info_layer"
-
-  description = "Layer containing mediainfo binary file compatible with AWS lambda servers (from https://mediaarea.net/download/snapshots/binary/mediainfo/)"
-}
-
 # Configuration
 #################
 
 resource "aws_lambda_function" "marsha_configure_lambda" {
   function_name    = "${terraform.workspace}-marsha-configure"
-  handler          = "index.handler"
-  # Run on the highest version of node available on AWS lambda
-  # https://docs.aws.amazon.com/lambda/latest/dg/API_CreateFunction.html#SSS-CreateFunction-request-Runtime
-  runtime          = "nodejs10.x"
-  filename         = "dist/marsha_configure.zip"
-  source_code_hash = "${base64sha256(file("dist/marsha_configure.zip"))}"
-  role             = "${aws_iam_role.lambda_invocation_role.arn}"
+  image_uri        = "${var.lambda_image_name}:${var.lambda_image_tag}"
+  package_type     = "Image"
+  role             = aws_iam_role.lambda_invocation_role.arn
 
   # The configuration lambda is invocated by Terraform upon deployment and may take
   # some time (for example when creating all the media convert presets from scratch)
   timeout = 60
 
+  image_config {
+    command = ["/var/task/lambda-configure/index.handler"]
+  }
+
   environment {
     variables = {
-      ENV_TYPE = "${terraform.workspace}"
+      ENV_TYPE = terraform.workspace
     }
   }
 }
 
 # Call the configuration lambda to create a Media Convert endpoint
 data "aws_lambda_invocation" "configure_lambda_endpoint" {
-  depends_on    = ["aws_lambda_function.marsha_configure_lambda"]
-  function_name = "${aws_lambda_function.marsha_configure_lambda.function_name}"
+  depends_on    = [aws_lambda_function.marsha_configure_lambda]
+  function_name = aws_lambda_function.marsha_configure_lambda.function_name
 
   input = <<EOF
 {"Resource": "MediaConvertEndPoint"}
@@ -46,15 +35,16 @@ EOF
 # Call the configuration lambda to create Media Convert presets
 # Passing as argument the endpoint url that we just retrieved
 data "aws_lambda_invocation" "configure_lambda_presets" {
-  depends_on    = ["aws_lambda_function.marsha_configure_lambda"]
-  function_name = "${aws_lambda_function.marsha_configure_lambda.function_name}"
+  depends_on    = [
+    aws_lambda_function.marsha_configure_lambda,
+    data.aws_lambda_invocation.configure_lambda_endpoint
+  ]
+  function_name = aws_lambda_function.marsha_configure_lambda.function_name
 
-  input = <<EOF
-{
-  "Resource": "MediaConvertPresets",
-  "EndPoint": "${data.aws_lambda_invocation.configure_lambda_endpoint.result_map["EndpointUrl"]}"
-}
-EOF
+  input = jsonencode({
+    "Resource": "MediaConvertPresets",
+    "EndPoint": jsondecode(data.aws_lambda_invocation.configure_lambda_endpoint.result)["EndpointUrl"]
+  })
 }
 
 # Encoding
@@ -62,28 +52,25 @@ EOF
 
 resource "aws_lambda_function" "marsha_encode_lambda" {
   function_name    = "${terraform.workspace}-marsha-encode"
-  handler          = "index.handler"
-  # Run on the highest version of node available on AWS lambda
-  # https://docs.aws.amazon.com/lambda/latest/dg/API_CreateFunction.html#SSS-CreateFunction-request-Runtime
-  runtime          = "nodejs10.x"
-  filename         = "dist/marsha_encode.zip"
-  source_code_hash = "${base64sha256(file("dist/marsha_encode.zip"))}"
-  role             = "${aws_iam_role.lambda_invocation_role.arn}"
+  image_uri        = "${var.lambda_image_name}:${var.lambda_image_tag}"
+  package_type     = "Image"
+  role             = aws_iam_role.lambda_invocation_role.arn
   memory_size      = "1536"
   timeout          = "90"
-  layers           = ["${aws_lambda_layer_version.media_info_layer.arn}"]
-  depends_on       = ["aws_lambda_layer_version.media_info_layer"]
 
+  image_config {
+    command = ["/var/task/lambda-encode/index.handler"]
+  }
 
   environment {
     variables = {
-      DISABLE_SSL_VALIDATION = "${var.update_state_disable_ssl_validation}"
+      DISABLE_SSL_VALIDATION = var.update_state_disable_ssl_validation
       ENDPOINT = "${var.marsha_base_url}${var.update_state_endpoint}"
-      ENV_TYPE = "${terraform.workspace}"
-      MEDIA_CONVERT_ROLE      = "${aws_iam_role.media_convert_role.arn}"
-      MEDIA_CONVERT_END_POINT = "${data.aws_lambda_invocation.configure_lambda_endpoint.result_map["EndpointUrl"]}"
-      S3_DESTINATION_BUCKET   = "${aws_s3_bucket.marsha_destination.id}"
-      SHARED_SECRET = "${var.update_state_secret}"
+      ENV_TYPE = terraform.workspace
+      MEDIA_CONVERT_ROLE      = aws_iam_role.media_convert_role.arn
+      MEDIA_CONVERT_END_POINT = jsondecode(data.aws_lambda_invocation.configure_lambda_endpoint.result)["EndpointUrl"]
+      S3_DESTINATION_BUCKET   = aws_s3_bucket.marsha_destination.id
+      SHARED_SECRET = var.update_state_secret
     }
   }
 }
@@ -91,9 +78,9 @@ resource "aws_lambda_function" "marsha_encode_lambda" {
 resource "aws_lambda_permission" "allow_bucket" {
   statement_id  = "AllowExecutionFromS3Bucket"
   action        = "lambda:InvokeFunction"
-  function_name = "${aws_lambda_function.marsha_encode_lambda.arn}"
+  function_name = aws_lambda_function.marsha_encode_lambda.arn
   principal     = "s3.amazonaws.com"
-  source_arn    = "${aws_s3_bucket.marsha_source.arn}"
+  source_arn    = aws_s3_bucket.marsha_source.arn
 }
 
 # Confirmation
@@ -101,20 +88,20 @@ resource "aws_lambda_permission" "allow_bucket" {
 
 resource "aws_lambda_function" "marsha_complete_lambda" {
   function_name    = "${terraform.workspace}-marsha-complete"
-  handler          = "index.handler"
-  # Run on the highest version of node available on AWS lambda
-  # https://docs.aws.amazon.com/lambda/latest/dg/API_CreateFunction.html#SSS-CreateFunction-request-Runtime
-  runtime          = "nodejs10.x"
-  filename         = "dist/marsha_complete.zip"
-  source_code_hash = "${base64sha256(file("dist/marsha_complete.zip"))}"
-  role             = "${aws_iam_role.lambda_invocation_role.arn}"
+  image_uri        = "${var.lambda_image_name}:${var.lambda_image_tag}"
+  package_type     = "Image"
+  role             = aws_iam_role.lambda_invocation_role.arn
+
+  image_config {
+    command = ["/var/task/lambda-complete/index.handler"]
+  }
 
   environment {
     variables = {
-      DISABLE_SSL_VALIDATION = "${var.update_state_disable_ssl_validation}"
+      DISABLE_SSL_VALIDATION = var.update_state_disable_ssl_validation
       ENDPOINT = "${var.marsha_base_url}${var.update_state_endpoint}"
-      ENV_TYPE = "${terraform.workspace}"
-      SHARED_SECRET = "${var.update_state_secret}"
+      ENV_TYPE = terraform.workspace
+      SHARED_SECRET = var.update_state_secret
     }
   }
 }
@@ -122,30 +109,29 @@ resource "aws_lambda_function" "marsha_complete_lambda" {
 resource "aws_lambda_permission" "allow_cloudwatch" {
   statement_id  = "AllowExecutionFromCloudWatch"
   action        = "lambda:InvokeFunction"
-  function_name = "${aws_lambda_function.marsha_complete_lambda.arn}"
+  function_name = aws_lambda_function.marsha_complete_lambda.arn
   principal     = "events.amazonaws.com"
-  source_arn    = "${aws_cloudwatch_event_rule.marsha_encode_complete_rule.arn}"
+  source_arn    = aws_cloudwatch_event_rule.marsha_encode_complete_rule.arn
 }
 
 # Migrations
 ################
 resource "aws_lambda_function" "marsha_migrate_lambda" {
   function_name    = "${terraform.workspace}-marsha-migrate"
-  handler          = "index.handler"
-  # Run on the highest version of node available on AWS lambda
-  # https://docs.aws.amazon.com/lambda/latest/dg/API_CreateFunction.html#SSS-CreateFunction-request-Runtime
-  runtime          = "nodejs10.x"
-  filename         = "dist/marsha_migrate.zip"
-  source_code_hash = "${base64sha256(file("dist/marsha_migrate.zip"))}"
-  role             = "${aws_iam_role.lambda_migrate_invocation_role.arn}"
+  image_uri        = "${var.lambda_image_name}:${var.lambda_image_tag}"
+  package_type     = "Image"
+  role             = aws_iam_role.lambda_migrate_invocation_role.arn
 
   timeout = 900
 
+  image_config {
+    command = ["/var/task/lambda-migrate/index.handler"]
+  }
+
   environment {
     variables = {
-      S3_SOURCE_BUCKET        = "${aws_s3_bucket.marsha_source.id}"
-      MIGRATIONS              = "${var.migrations}"
-      LAMBDA_ENCODE_NAME      = "${aws_lambda_function.marsha_encode_lambda.function_name}"
+      S3_SOURCE_BUCKET        = aws_s3_bucket.marsha_source.id
+      LAMBDA_ENCODE_NAME      = aws_lambda_function.marsha_encode_lambda.function_name
       NODE_ENV                = "production"
     }
   }
@@ -154,39 +140,67 @@ resource "aws_lambda_function" "marsha_migrate_lambda" {
 # Invoke marsha-migrate lambda on each deploy with an empty input
 data "aws_lambda_invocation" "invoke_migration" {
   depends_on    = [
-    "aws_lambda_function.marsha_migrate_lambda",
-    "aws_lambda_function.marsha_encode_lambda"
+    aws_lambda_function.marsha_migrate_lambda,
+    aws_lambda_function.marsha_encode_lambda
   ]
-  function_name     = "${aws_lambda_function.marsha_migrate_lambda.function_name}"
-  input = "{}"
+  function_name     = aws_lambda_function.marsha_migrate_lambda.function_name
+  input             = jsonencode({
+    "migrations" = var.migrations
+  })
 }
 
 # MediaLive
 ###########
 
 resource "aws_lambda_function" "marsha_medialive_lambda" {
-  function_name    = "${terraform.workspace}-marsha-medialive"
-  handler          = "index.handler"
-  # Run on the highest version of node available on AWS lambda
-  # https://docs.aws.amazon.com/lambda/latest/dg/API_CreateFunction.html#SSS-CreateFunction-request-Runtime
-  runtime          = "nodejs10.x"
-  filename         = "dist/marsha_medialive.zip"
-  source_code_hash = "${base64sha256(file("dist/marsha_medialive.zip"))}"
-  role             = "${aws_iam_role.lambda_medialive_invocation_role.arn}"
+  function_name    = "${terraform.workspace}-${var.medialive_lambda_name}"
+  image_uri        = "${var.lambda_image_name}:${var.lambda_image_tag}"
+  package_type     = "Image"
+  role             = aws_iam_role.lambda_medialive_invocation_role.arn
+  timeout          = 120
+
+  image_config {
+    command = ["/var/task/lambda-medialive/index.handler"]
+  }
 
   environment {
     variables = {
-      DISABLE_SSL_VALIDATION = "${var.update_state_disable_ssl_validation}"
-      MARSHA_URL = "${var.marsha_base_url}"
-      SHARED_SECRET = "${var.update_state_secret}"
+      DISABLE_SSL_VALIDATION = var.update_state_disable_ssl_validation
+      MARSHA_URL = var.marsha_base_url
+      SHARED_SECRET = var.update_state_secret
     }
   }
 }
 
-resource "aws_lambda_permission" "allow_cloudwatch_medialive" {
-  statement_id  = "AllowExecutionFromCloudWatch"
-  action        = "lambda:InvokeFunction"
-  function_name = "${aws_lambda_function.marsha_medialive_lambda.arn}"
-  principal     = "events.amazonaws.com"
-  source_arn    = "${aws_cloudwatch_event_rule.marsha_medialive_channel_state_change.arn}"
+# Mediapackage
+
+data "aws_region" "current" {}
+
+resource "aws_lambda_function" "marsha_mediapackage_lambda" {
+  function_name    = "${terraform.workspace}-${var.mediapackage_lambda_name}"
+  image_uri        = "${var.lambda_image_name}:${var.lambda_image_tag}"
+  package_type     = "Image"
+  role             = aws_iam_role.lambda_mediapackage_invocation_role.arn
+  timeout          = 90
+
+  image_config {
+    command = ["/var/task/lambda-mediapackage/index.handler"]
+  }
+
+  environment {
+    variables = {
+      CLOUDFRONT_ENDPOINT = aws_cloudfront_distribution.marsha_cloudfront_distribution.domain_name
+      CONTAINER_NAME = "${terraform.workspace}-marsha-ffmpeg-transmux"
+      DESTINATION_BUCKET_NAME = aws_s3_bucket.marsha_destination.bucket
+      DESTINATION_BUCKET_REGION = data.aws_region.current.name
+      DISABLE_SSL_VALIDATION = var.update_state_disable_ssl_validation
+      ECS_CLUSTER = aws_ecs_cluster.marsha_ffmpeg_transmux_cluster.arn
+      ECS_TASK_DEFINITION = aws_ecs_task_definition.marsha_ffmpeg_transmux_definition.arn
+      ENDPOINT = "${var.marsha_base_url}${var.update_state_endpoint}"
+      SECURITY_GROUP = aws_security_group.fargate_ffmpeg_transmux_security_group.id
+      SHARED_SECRET = var.update_state_secret
+      VPC_SUBNET1 = aws_subnet.fargate_ffmpeg_transmux_vpc_public_subnet1.id
+      VPC_SUBNET2 = aws_subnet.fargate_ffmpeg_transmux_vpc_public_subnet2.id
+    }
+  }
 }

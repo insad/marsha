@@ -25,9 +25,7 @@
 # ==============================================================================
 # VARIABLES
 
-# -- Project
-PROJECT_NAME := $(shell python src/backend/setup.py --name)
-PROJECT_VERSION := $(shell python src/backend/setup.py --version)
+include env.d/development
 
 BOLD := \033[1m
 RESET := \033[0m
@@ -37,6 +35,7 @@ COMPOSE              = docker-compose
 COMPOSE_RUN          = $(COMPOSE) run --rm
 COMPOSE_RUN_APP      = $(COMPOSE_RUN) app
 COMPOSE_RUN_CROWDIN  = $(COMPOSE_RUN) crowdin crowdin
+COMPOSE_RUN_LAMBDA   = $(COMPOSE_RUN) --entrypoint "" # disable lambda entrypoint to run command in container
 COMPOSE_RUN_NODE     = $(COMPOSE_RUN) node
 YARN                 = $(COMPOSE_RUN_NODE) yarn
 
@@ -50,10 +49,13 @@ default: help
 bootstrap: ## Prepare Docker images for the project
 bootstrap: \
 	env.d/development \
+	env.d/lambda \
 	build \
+	build-lambda-dev \
 	run \
 	migrate \
-	i18n-compile-back
+	i18n-compile-back \
+	prosody-admin
 .PHONY: bootstrap
 
 # -- Docker/compose
@@ -62,6 +64,10 @@ build: ## build the app container
 	@$(COMPOSE) build base;
 	@$(COMPOSE) build app;
 .PHONY: build
+
+build-lambda-dev: ## build all aws lambda
+	@$(COMPOSE) build lambda_base
+.PHONY: build-lambda-dev
 
 down: ## Stop and remove containers, networks, images, and volumes
 	@$(COMPOSE) down
@@ -72,10 +78,28 @@ logs: ## display app logs (follow mode)
 .PHONY: logs
 
 run: ## start the development server using Docker
-	@$(COMPOSE) up -d
+	@$(COMPOSE) up -d app
 	@echo "Wait for postgresql to be up..."
 	@$(COMPOSE_RUN) dockerize -wait tcp://db:5432 -timeout 60s
+	@$(COMPOSE) up -d prosody-nginx
 .PHONY: run
+
+ngrok: ## start the development server using Docker through ngrok
+ngrok: run
+	@$(COMPOSE) up -d ngrok
+	@echo
+	@echo "$(BOLD)App running at:$(RESET)"
+	@bin/get_ngrok_url
+.PHONY: ngrok
+
+ngrok-apply: ## start the development server using Docker through ngrok and apply terraform plan
+ngrok-apply: ngrok
+	@make -C src/aws/ apply
+	@echo
+	@echo "$(BOLD)App running at:$(RESET)"
+	@bin/get_ngrok_url
+.PHONY: ngrok-apply
+
 
 stop: ## stop the development server using Docker
 	@$(COMPOSE) stop
@@ -158,6 +182,11 @@ superuser: ## create a Django superuser
 	@$(COMPOSE_RUN_APP) python manage.py createsuperuser
 .PHONY: superuser
 
+prosody-admin: ## create prosody admin user
+	@echo "$(BOLD)Creating a prosody admin$(RESET)"
+	$(COMPOSE_RUN) prosody-app prosodyctl register admin prosody-app "${DJANGO_XMPP_PRIVATE_SERVER_PASSWORD}"
+.PHONY: 
+
 .PHONY: test
 test:  ## Run django tests for the marsha project.
 	@echo "$(BOLD)Running tests$(RESET)"
@@ -172,7 +201,7 @@ build-front: \
 .PHONY: build-front
 
 build-sass: ## Build Sass file to CSS
-	@$(YARN) sass
+	@$(YARN) build-sass
 .PHONY: build-sass
 
 build-ts: ### Build TypeScript application
@@ -183,6 +212,125 @@ build-ts: ### Build TypeScript application
 watch-front: ## Build front application and activate watch mode
 	@$(YARN) build --watch
 .PHONY: watch-front
+
+## -- AWS
+
+lambda-install-dev-dependencies: ## Install all lambda dependencies
+lambda-install-dev-dependencies: \
+	lambda-install-dev-dependencies-complete \
+	lambda-install-dev-dependencies-configure \
+	lambda-install-dev-dependencies-encode \
+	lambda-install-dev-dependencies-medialive \
+	lambda-install-dev-dependencies-mediapackage \
+	lambda-install-dev-dependencies-elemental-routing \
+	lambda-install-dev-dependencies-migrate
+.PHONY: lambda-install-dev-dependencies
+
+lambda-install-dev-dependencies-complete: ## Install dependencies for lambda complete
+	@$(COMPOSE_RUN_LAMBDA) lambda_complete yarn install
+.PHONY: lambda-install-dev-dependencies-encode
+
+lambda-install-dev-dependencies-configure: ## Install dependencies for lambda configure
+	@$(COMPOSE_RUN_LAMBDA) lambda_configure yarn install
+.PHONY: lambda-install-dev-dependencies-configure
+
+lambda-install-dev-dependencies-encode: ## Install dependencies for lambda encode
+	@$(COMPOSE_RUN_LAMBDA) lambda_encode yarn install
+.PHONY: lambda-install-dev-dependencies-encode
+
+lambda-install-dev-dependencies-medialive: ## Install dependencies for lambda medialive
+	@$(COMPOSE_RUN_LAMBDA) lambda_medialive yarn install
+.PHONY: lambda-install-dev-dependencies-medialive
+
+lambda-install-dev-dependencies-mediapackage: ## Install dependencies for lambda mediapackage
+	@$(COMPOSE_RUN_LAMBDA) lambda_mediapackage yarn install
+.PHONY: lambda-install-dev-dependencies-mediapackage
+
+lambda-install-dev-dependencies-elemental-routing: ## Install dependencies for lambda elemental routing
+	@$(COMPOSE_RUN_LAMBDA) lambda_elemental_routing yarn install
+.PHONY: lambda-install-dev-dependencies-elemental-routing
+
+lambda-install-dev-dependencies-migrate: ## Install dependencies for lambda migrate
+	@$(COMPOSE_RUN_LAMBDA) lambda_migrate yarn install
+.PHONY: lambda-install-dev-dependencies-migrate
+
+test-lambda: ## Run all aws lambda tests
+test-lambda: \
+	test-lambda-complete \
+	test-lambda-configure \
+	test-lambda-encode \
+	test-lambda-medialive \
+	test-lambda-mediapackage \
+	test-lambda-elemental-routing \
+	test-lambda-migrate
+.PHONY: test-lambda
+
+test-lambda-complete: ## test aws lambda complete
+	@$(COMPOSE_RUN_LAMBDA) lambda_complete yarn test
+.PHONY: test-lambda-complete
+
+test-lambda-configure: ## test aws lambda configure
+	@$(COMPOSE_RUN_LAMBDA) lambda_configure yarn test
+.PHONY: test-lambda-configure
+
+test-lambda-encode: ## test aws lambda encode
+	@$(COMPOSE_RUN_LAMBDA) lambda_encode yarn test
+.PHONY: test-lambda-encode
+
+test-lambda-medialive: ## test aws lambda medialive
+	@$(COMPOSE_RUN_LAMBDA) lambda_medialive yarn test
+.PHONY: test-lambda-medialive
+
+test-lambda-mediapackage: ## test aws lambda mediapackage
+	@$(COMPOSE_RUN_LAMBDA) lambda_mediapackage yarn test
+.PHONY: test-lambda-mediapackage
+
+test-lambda-elemental-routing: ## test aws lambda elemental routing
+	@$(COMPOSE_RUN_LAMBDA) lambda_elemental_routing yarn test
+.PHONY: test-lambda-elemental-routing
+
+test-lambda-migrate: ## test aws lambda migrate
+	@$(COMPOSE_RUN_LAMBDA) lambda_migrate yarn test
+.PHONY: test-lambda-migrate
+
+lint-lambda: ## Run linter an all lambda functions
+lint-lambda: \
+	lint-lambda-complete \
+	lint-lambda-configure \
+	lint-lambda-encode \
+	lint-lambda-medialive \
+	lint-lambda-mediapackage \
+	lint-lambda-elemental-routing \
+	lint-lambda-migrate
+.PHONY: lint-lambda
+
+lint-lambda-complete: ## run linter on lambda complete function
+	@$(COMPOSE_RUN_LAMBDA) lambda_complete yarn lint
+.PHONY: lint-lambda-complete
+
+lint-lambda-configure: ## run linter on lambda configure function
+	@$(COMPOSE_RUN_LAMBDA) lambda_configure yarn lint
+.PHONY: lint-lambda-configure
+
+lint-lambda-encode: ## run linter on lambda encode function
+	@$(COMPOSE_RUN_LAMBDA) lambda_encode yarn lint
+.PHONY: lint-lambda-encode
+
+lint-lambda-medialive: ## run linter on lambda medialive function
+	@$(COMPOSE_RUN_LAMBDA) lambda_medialive yarn lint
+.PHONY: lint-lambda-medialive
+
+lint-lambda-mediapackage: ## run linter on lambda mediapackage function
+	@$(COMPOSE_RUN_LAMBDA) lambda_mediapackage yarn lint
+.PHONY: lint-lambda-mediapackage
+
+lint-lambda-elemental-routing: ## run linter on lambda elemental routing function
+	@$(COMPOSE_RUN_LAMBDA) lambda_elemental_routing yarn lint
+.PHONY: lint-lambda-elemental-routing
+
+lint-lambda-migrate: ## run linter on lambda complete function
+	@$(COMPOSE_RUN_LAMBDA) lambda_migrate yarn lint
+.PHONY: lint-lambda-migrate
 
 # -- Internationalization
 
@@ -240,6 +388,9 @@ i18n-download-and-compile: \
 
 env.d/development:
 	cp env.d/development.dist env.d/development
+
+env.d/lambda:
+	cp env.d/lambda.dist env.d/lambda
 
 help:  ## Show this help
 	@echo "$(BOLD)Marsha Makefile$(RESET)"

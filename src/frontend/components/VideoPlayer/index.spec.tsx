@@ -6,20 +6,12 @@ import { ImportMock } from 'ts-mock-imports';
 import * as useTimedTextTrackModule from '../../data/stores/useTimedTextTrack';
 import { createPlayer } from '../../Player/createPlayer';
 import { uploadState } from '../../types/tracks';
-import { isHlsSupported, isMSESupported } from '../../utils/isAbrSupported';
 import { videoMockFactory } from '../../utils/tests/factories';
 import { wrapInIntlProvider } from '../../utils/tests/intl';
 import { jestMockOf } from '../../utils/types';
 import VideoPlayer from './index';
 
 jest.mock('jwt-decode', () => jest.fn());
-
-jest.mock('../../utils/isAbrSupported', () => ({
-  isHlsSupported: jest.fn(),
-  isMSESupported: jest.fn(),
-}));
-const mockIsMSESupported = isMSESupported as jestMockOf<typeof isMSESupported>;
-const mockIsHlsSupported = isHlsSupported as jestMockOf<typeof isHlsSupported>;
 
 jest.mock('../../Player/createPlayer', () => ({
   createPlayer: jest.fn(),
@@ -43,7 +35,6 @@ const mockVideo = videoMockFactory({
   upload_state: uploadState.READY,
   urls: {
     manifests: {
-      dash: 'https://example.com/dash.mpd',
       hls: 'https://example.com/hls.m3u8',
     },
     mp4: {
@@ -51,7 +42,8 @@ const mockVideo = videoMockFactory({
       1080: 'https://example.com/1080p.mp4',
     },
     thumbnails: {
-      720: 'https://example.com/144p.jpg',
+      144: 'https://example.com/thumbnail/144p.jpg',
+      1080: 'https://example.com/thumbnail/1080p.jpg',
     },
   },
 });
@@ -90,11 +82,7 @@ describe('VideoPlayer', () => {
   afterEach(() => fetchMock.restore());
   afterEach(jest.clearAllMocks);
 
-  it('starts up the player with DashJS and renders all the relevant sources', async () => {
-    // Simulate a browser that supports MSE and will use DashJS
-    mockIsMSESupported.mockReturnValue(true);
-    mockIsHlsSupported.mockReturnValue(false);
-
+  it('starts up the player with HLS source and renders all the relevant sources', async () => {
     useTimedTextTrackStub.returns([
       {
         active_stamp: 1549385921,
@@ -103,6 +91,7 @@ describe('VideoPlayer', () => {
         language: 'fr',
         mode: 'st',
         upload_state: 'ready',
+        origin_url: 'https://example.com/timedtext/ttt-1',
         url: 'https://example.com/timedtext/ttt-1.vtt',
       },
       {
@@ -112,6 +101,7 @@ describe('VideoPlayer', () => {
         language: 'fr',
         mode: 'st',
         upload_state: 'ready',
+        origin_url: 'https://example.com/timedtext/ttt-2',
         url: 'https://example.com/timedtext/ttt-2.vtt',
       },
       {
@@ -121,6 +111,7 @@ describe('VideoPlayer', () => {
         language: 'en',
         mode: 'cc',
         upload_state: 'ready',
+        origin_url: 'https://example.com/timedtext/ttt-3',
         url: 'https://example.com/timedtext/ttt-3.vtt',
       },
       {
@@ -130,17 +121,20 @@ describe('VideoPlayer', () => {
         language: 'fr',
         mode: 'ts',
         upload_state: 'ready',
+        origin_url: 'https://example.com/timedtext/ttt-4',
         url: 'https://example.com/timedtext/ttt-4.vtt',
       },
     ]);
 
     const { container, getByText, queryByText } = render(
-      wrapInIntlProvider(<VideoPlayer video={mockVideo} />),
+      wrapInIntlProvider(
+        <VideoPlayer video={mockVideo} playerType={'videojs'} />,
+      ),
     );
     await waitFor(() =>
       // The player is created and initialized with DashJS for adaptive bitrate
       expect(mockCreatePlayer).toHaveBeenCalledWith(
-        'plyr',
+        'videojs',
         expect.any(Element),
         expect.anything(),
         mockVideo,
@@ -159,61 +153,27 @@ describe('VideoPlayer', () => {
     expect(container.querySelectorAll('source[type="video/mp4"]')).toHaveLength(
       2,
     );
-    expect(container.querySelector('video')!.tabIndex).toEqual(-1);
+    const videoElement = container.querySelector('video')!;
+    expect(videoElement.tabIndex).toEqual(-1);
+    expect(videoElement.poster).toEqual(
+      'https://example.com/thumbnail/1080p.jpg',
+    );
   });
 
   it('allows video download when the video object specifies it', async () => {
-    mockIsMSESupported.mockReturnValue(false);
     mockVideo.show_download = true;
 
-    render(wrapInIntlProvider(<VideoPlayer video={mockVideo} />));
+    render(
+      wrapInIntlProvider(
+        <VideoPlayer video={mockVideo} playerType={'videojs'} />,
+      ),
+    );
 
     await screen.findByText(/Download this video/i);
     screen.getByText('Show a transcript');
   });
 
-  it('does not use DashJS when MSE are not supported', async () => {
-    // Simulate a browser that does not support MSE
-    mockIsMSESupported.mockReturnValue(false);
-    const { container } = render(
-      wrapInIntlProvider(<VideoPlayer video={mockVideo} />),
-    );
-    await waitFor(() =>
-      // The player is created and initialized with DashJS for adaptive bitrate
-      expect(mockCreatePlayer).toHaveBeenCalledWith(
-        'plyr',
-        expect.any(Element),
-        expect.anything(),
-        mockVideo,
-      ),
-    );
-
-    expect(container.querySelectorAll('source[type="video/mp4"]')).toHaveLength(
-      2,
-    );
-  });
-
-  it('uses HLS source when browser support it', async () => {
-    mockIsHlsSupported.mockReturnValue(true);
-
-    const { container } = render(
-      wrapInIntlProvider(<VideoPlayer video={mockVideo} />),
-    );
-    await waitFor(() =>
-      expect(
-        container.querySelectorAll(
-          'source[type="application/vnd.apple.mpegURL"]',
-        ),
-      ).toHaveLength(1),
-    );
-
-    expect(container.querySelectorAll('source[type="video/mp4"]')).toHaveLength(
-      0,
-    );
-  });
-
   it('uses subtitles as transcripts', async () => {
-    mockIsHlsSupported.mockReturnValue(true);
     mockVideo.should_use_subtitle_as_transcript = true;
     mockVideo.has_transcript = false;
 
@@ -230,7 +190,9 @@ describe('VideoPlayer', () => {
     ]);
 
     const { container } = render(
-      wrapInIntlProvider(<VideoPlayer video={mockVideo} />),
+      wrapInIntlProvider(
+        <VideoPlayer video={mockVideo} playerType={'videojs'} />,
+      ),
     );
 
     await screen.findByText('Show a transcript');
@@ -238,7 +200,6 @@ describe('VideoPlayer', () => {
   });
 
   it('displays transcript with should_use_subtitle_as_transcript enabled', async () => {
-    mockIsHlsSupported.mockReturnValue(true);
     mockVideo.should_use_subtitle_as_transcript = true;
     mockVideo.has_transcript = true;
 
@@ -263,8 +224,10 @@ describe('VideoPlayer', () => {
       },
     ]);
 
-    const { container, getByText } = render(
-      wrapInIntlProvider(<VideoPlayer video={mockVideo} />),
+    const { container } = render(
+      wrapInIntlProvider(
+        <VideoPlayer video={mockVideo} playerType={'videojs'} />,
+      ),
     );
 
     await screen.findByText('Show a transcript');

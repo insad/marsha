@@ -128,14 +128,24 @@ src/frontend/i18n/frontend.json
 src/backend/marsha/static/css
 src/backend/marsha/static/js
 
+# Assets
+./data/
+
 # Terraform
 .terraform
 *.tfstate
 *.tfstate.backup
+src/aws/**/state.tf
 
 # Lambda build
 dist
 node_modules
 
+# Lambda
+transmuxed_video
+
 # Ssh keys
 .ssh
+
+# ngrok
+.ngrok_url

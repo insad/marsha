@@ -1,29 +1,8 @@
-import Hls from 'hls.js';
-
-import { Video } from '../types/tracks';
-import { isHlsSupported, isMSESupported } from '../utils/isAbrSupported';
+import { timedTextMode, uploadState } from '../types/tracks';
+import { videoMockFactory } from '../utils/tests/factories';
 import { jestMockOf } from '../utils/types';
-import { createDashPlayer } from './createDashPlayer';
 import { createHlsPlayer } from './createHlsPlayer';
 import { createPlyrPlayer } from './createPlyrPlayer';
-
-jest.mock('../utils/isAbrSupported', () => ({
-  isHlsSupported: jest.fn(),
-  isMSESupported: jest.fn(),
-}));
-const mockIsMSESupported = isMSESupported as jestMockOf<typeof isMSESupported>;
-const mockIsHlsSupported = isHlsSupported as jestMockOf<typeof isHlsSupported>;
-
-const mockDashOnListener = jest.fn();
-jest.mock('./createDashPlayer', () => ({
-  createDashPlayer: jest.fn(() => ({
-    on: mockDashOnListener,
-  })),
-}));
-
-const mockCreateDashPlayer = createDashPlayer as jestMockOf<
-  typeof createDashPlayer
->;
 
 jest.mock('./createHlsPlayer', () => ({
   createHlsPlayer: jest.fn(),
@@ -80,56 +59,64 @@ jest.mock('../data/appData', () => ({
 }));
 
 describe('createPlyrPlayer', () => {
-  const video = {
+  const video = videoMockFactory({
     description: 'Some description',
     id: 'video-id',
     is_ready_to_show: true,
-    show_download: false,
-    thumbnail: null,
     timed_text_tracks: [
       {
         active_stamp: 1549385921,
         id: 'ttt-1',
         is_ready_to_show: true,
         language: 'fr',
-        mode: 'st',
-        upload_state: 'ready',
+        mode: timedTextMode.SUBTITLE,
+        upload_state: uploadState.READY,
         url: 'https://example.com/timedtext/ttt-1.vtt',
+        source_url: 'https://example.com/timedtext/ttt-1.vtt',
+        video: 'video-id',
+        title: 'foo',
       },
       {
         active_stamp: 1549385922,
         id: 'ttt-2',
         is_ready_to_show: false,
         language: 'fr',
-        mode: 'st',
-        upload_state: 'ready',
+        mode: timedTextMode.SUBTITLE,
+        upload_state: uploadState.READY,
         url: 'https://example.com/timedtext/ttt-2.vtt',
+        source_url: 'https://example.com/timedtext/ttt-2.vtt',
+        video: 'video-id',
+        title: 'foo',
       },
       {
         active_stamp: 1549385923,
         id: 'ttt-3',
         is_ready_to_show: true,
         language: 'en',
-        mode: 'cc',
-        upload_state: 'ready',
+        mode: timedTextMode.CLOSED_CAPTIONING,
+        upload_state: uploadState.READY,
         url: 'https://example.com/timedtext/ttt-3.vtt',
+        source_url: 'https://example.com/timedtext/ttt-3.vtt',
+        video: 'video-id',
+        title: 'foo',
       },
       {
         active_stamp: 1549385924,
         id: 'ttt-4',
         is_ready_to_show: true,
         language: 'fr',
-        mode: 'ts',
-        upload_state: 'ready',
+        mode: timedTextMode.SUBTITLE,
+        upload_state: uploadState.READY,
         url: 'https://example.com/timedtext/ttt-4.vtt',
+        source_url: 'https://example.com/timedtext/ttt-4.vtt',
+        video: 'video-id',
+        title: 'foo',
       },
     ],
     title: 'Some title',
-    upload_state: 'ready',
-    live_state: null,
+    upload_state: uploadState.READY,
     urls: {
       manifests: {
-        dash: 'https://example.com/dash.mpd',
         hls: 'https://example.com/hls.m3u8',
       },
       mp4: {
@@ -140,16 +127,12 @@ describe('createPlyrPlayer', () => {
         720: 'https://example.com/144p.jpg',
       },
     },
-  };
+  });
   beforeEach(() => {
     jest.clearAllMocks();
   });
   it('creates Plyr player and configure it', () => {
-    mockIsMSESupported.mockReturnValue(false);
-    mockIsHlsSupported.mockReturnValue(false);
-    const player = createPlyrPlayer('ref' as any, jest.fn(), video as Video);
-
-    expect(mockCreateDashPlayer).not.toHaveBeenCalled();
+    const player = createPlyrPlayer('ref' as any, jest.fn(), video.urls!);
 
     const playButton = player.elements.buttons.play! as HTMLButtonElement[];
     expect(playButton[0].tabIndex).toEqual(-1);
@@ -236,49 +219,5 @@ describe('createPlyrPlayer', () => {
       'volumechange',
       expect.any(Function),
     );
-  });
-  it('creates Plyr player with DashJS', () => {
-    mockIsMSESupported.mockReturnValue(true);
-
-    const ref = 'ref' as any;
-    createPlyrPlayer(ref, jest.fn(), video as Video);
-
-    expect(mockCreateDashPlayer).toHaveBeenCalledWith(video, ref);
-    expect(mockDashOnListener).toHaveBeenCalled();
-  });
-  it('overrides sources when ABR and HLS is not available', () => {
-    mockIsMSESupported.mockReturnValue(false);
-    mockIsHlsSupported.mockReturnValue(false);
-
-    const ref = 'ref' as any;
-    const player = createPlyrPlayer(ref, jest.fn(), video as Video);
-
-    expect(player.source).toEqual({
-      sources: [
-        { size: 144, src: 'https://example.com/144p.mp4', type: 'video/mp4' },
-        {
-          size: 1080,
-          src: 'https://example.com/1080p.mp4',
-          type: 'video/mp4',
-        },
-      ],
-      tracks: [],
-      type: 'video',
-    });
-  });
-  it('creates Plyr player and configure hls if video in live mode', () => {
-    mockIsMSESupported.mockReturnValue(false);
-    mockIsHlsSupported.mockReturnValue(false);
-    jest.spyOn(Hls, 'isSupported').mockReturnValue(true);
-
-    const ref = 'ref' as any;
-    const player = createPlyrPlayer(ref, jest.fn(), {
-      ...video,
-      upload_state: 'pending',
-      live_state: 'idle',
-    } as Video);
-
-    expect(mockCreateHlsPlayer).toHaveBeenCalled();
-    expect(mockCreateDashPlayer).not.toHaveBeenCalled();
   });
 });

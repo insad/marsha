@@ -1,3 +1,5 @@
+const path = require('path');
+
 module.exports = {
   // Disable production-specific optimizations by default
   // They can be re-enabled by running the cli with `--mode=production` or making a separate
@@ -20,8 +22,9 @@ module.exports = {
   // is on AWS.
   output: {
     filename: 'index.js',
-    path: __dirname + '/../backend/marsha/static/js',
-    chunkFilename: '[id].[hash].index.js',
+    path: __dirname + '/../backend/marsha/static/js/build',
+    chunkFilename: '[id].[fullhash].index.js',
+    clean: true,
   },
 
   // Enable sourcemaps for debugging webpack's output.
@@ -30,11 +33,23 @@ module.exports = {
   resolve: {
     // Add '.ts' and '.tsx' as resolvable extensions.
     extensions: ['.ts', '.tsx', '.js', '.json'],
+    fallback: {
+      buffer: require.resolve('buffer/'),
+      stream: require.resolve('stream-browserify'),
+    },
   },
 
   module: {
     rules: [
       { test: /\.css$/, use: ['style-loader', 'css-loader'] },
+      {
+        test: /\.(png|svg|jpg|jpeg|gif)$/i,
+        type: 'asset/resource',
+      },
+      {
+        test: /\.(woff|woff2|eot|ttf|otf)$/i,
+        type: 'asset/resource',
+      },
       {
         test: /(public-path\.js|\.tsx?$|(memoize-one|react-intl|zustand).*\.(jsx?))/,
         use: [
@@ -47,7 +62,12 @@ module.exports = {
         ],
       },
       // All output '.js' files will have any sourcemaps re-processed by 'source-map-loader'.
-      { enforce: 'pre', test: /\.js$/, loader: 'source-map-loader' },
+      {
+        enforce: 'pre',
+        test: /\.js$/,
+        exclude: [path.join(__dirname, './node_modules/file-selector')],
+        loader: 'source-map-loader',
+      },
     ],
   },
 };

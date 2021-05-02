@@ -5,6 +5,7 @@ from django.test import TestCase, override_settings
 
 from botocore.stub import ANY, Stubber
 
+from ..factories import VideoFactory
 from ..utils import medialive_utils
 
 
@@ -124,13 +125,14 @@ class MediaLiveUtilsTestCase(TestCase):
 
         self.assertEqual("tagged_security_group", security_group_id)
 
+    @override_settings(AWS_BASE_NAME="test")
     def test_create_mediapackage_channel(self):
         """Create an AWS mediapackage channel."""
         key = "video-key"
 
         ssm_response = {"Version": 1, "Tier": "Standard"}
         mediapackage_create_channel_response = {
-            "Id": "channel1",
+            "Id": f"test_{key}",
             "HlsIngest": {
                 "IngestEndpoints": [
                     {
@@ -153,55 +155,62 @@ class MediaLiveUtilsTestCase(TestCase):
             "Url": "https://endpoint1/channel.m3u8",
             "Id": "enpoint1",
         }
+
         with Stubber(
             medialive_utils.mediapackage_client
         ) as mediapackage_stubber, Stubber(medialive_utils.ssm_client) as ssm_stubber:
             mediapackage_stubber.add_response(
                 "create_channel",
                 service_response=mediapackage_create_channel_response,
-                expected_params={"Id": key},
+                expected_params={"Id": f"test_{key}", "Tags": {"environment": "test"}},
             )
             ssm_stubber.add_response(
                 "put_parameter",
                 service_response=ssm_response,
                 expected_params={
-                    "Name": "user1",
+                    "Name": "test_user1",
                     "Description": "video-key MediaPackage Primary Ingest Username",
                     "Value": "password1",
                     "Type": "String",
+                    "Tags": [{"Key": "environment", "Value": "test"}],
                 },
             )
             ssm_stubber.add_response(
                 "put_parameter",
                 service_response=ssm_response,
                 expected_params={
-                    "Name": "user2",
+                    "Name": "test_user2",
                     "Description": "video-key MediaPackage Secondary Ingest Username",
                     "Value": "password2",
                     "Type": "String",
+                    "Tags": [{"Key": "environment", "Value": "test"}],
                 },
             )
             mediapackage_stubber.add_response(
                 "create_origin_endpoint",
                 service_response=mediapackage_create_hls_origin_endpoint_response,
                 expected_params={
-                    "ChannelId": "channel1",
-                    "Id": "channel1-hls",
-                    "ManifestName": "channel1-hls",
+                    "ChannelId": f"test_{key}",
+                    "Id": "test_video-key_hls",
+                    "ManifestName": "test_video-key_hls",
                     "StartoverWindowSeconds": 86400,
                     "TimeDelaySeconds": 0,
                     "HlsPackage": {
                         "AdMarkers": "PASSTHROUGH",
                         "IncludeIframeOnlyStream": False,
                         "PlaylistType": "EVENT",
-                        "PlaylistWindowSeconds": 5,
+                        "PlaylistWindowSeconds": 10,
                         "ProgramDateTimeIntervalSeconds": 0,
-                        "SegmentDurationSeconds": 1,
+                        "SegmentDurationSeconds": 4,
                     },
+                    "Tags": {"environment": "test"},
                 },
             )
 
-            [channel, hls_endpoint] = medialive_utils.create_mediapackage_channel(key)
+            [
+                channel,
+                hls_endpoint,
+            ] = medialive_utils.create_mediapackage_channel(key)
 
             mediapackage_stubber.assert_no_pending_responses()
             ssm_stubber.assert_no_pending_responses()
@@ -209,6 +218,7 @@ class MediaLiveUtilsTestCase(TestCase):
         self.assertEqual(channel, mediapackage_create_channel_response)
         self.assertEqual(hls_endpoint, mediapackage_create_hls_origin_endpoint_response)
 
+    @override_settings(AWS_BASE_NAME="test")
     def test_create_medialive_input(self):
         """Create and return an AWS medialive input."""
         key = "video-key"
@@ -235,12 +245,13 @@ class MediaLiveUtilsTestCase(TestCase):
                 service_response=medialive_create_input_response,
                 expected_params={
                     "InputSecurityGroups": ["security_group_1"],
-                    "Name": key,
+                    "Name": f"test_{key}",
                     "Type": "RTMP_PUSH",
                     "Destinations": [
                         {"StreamName": "video-key-primary"},
                         {"StreamName": "video-key-secondary"},
                     ],
+                    "Tags": {"environment": "test"},
                 },
             )
 
@@ -250,6 +261,7 @@ class MediaLiveUtilsTestCase(TestCase):
         self.assertEqual(response, medialive_create_input_response)
 
     @override_settings(AWS_MEDIALIVE_ROLE_ARN="medialive:role:arn")
+    @override_settings(AWS_BASE_NAME="test")
     def test_create_medialive_channel(self):
         """Create an AWS medialive channel."""
         key = "video-key"
@@ -294,21 +306,22 @@ class MediaLiveUtilsTestCase(TestCase):
                             "Id": "destination1",
                             "Settings": [
                                 {
-                                    "PasswordParam": "user1",
+                                    "PasswordParam": "test_user1",
                                     "Url": "https://endpoint1/channel",
                                     "Username": "user1",
                                 },
                                 {
-                                    "PasswordParam": "user2",
+                                    "PasswordParam": "test_user2",
                                     "Url": "https://endpoint2/channel",
                                     "Username": "user2",
                                 },
                             ],
                         }
                     ],
-                    "Name": key,
+                    "Name": f"test_{key}",
                     "RoleArn": "medialive:role:arn",
                     "EncoderSettings": ANY,
+                    "Tags": {"environment": "test"},
                 },
             )
 
@@ -353,7 +366,7 @@ class MediaLiveUtilsTestCase(TestCase):
                 {
                     "ChannelId": "channel1",
                     "Url": "https://endpoint1/channel.m3u8",
-                    "Id": "enpoint1",
+                    "Id": "endpoint1",
                 },
             ]
             mock_medialive_input.return_value = {
@@ -394,10 +407,86 @@ class MediaLiveUtilsTestCase(TestCase):
                     "channel": {"id": "channel1"},
                     "endpoints": {
                         "hls": {
-                            "id": "enpoint1",
+                            "id": "endpoint1",
                             "url": "https://endpoint1/channel.m3u8",
                         },
                     },
                 },
             },
         )
+
+    @override_settings(AWS_MEDIAPACKAGE_HARVEST_JOB_ARN="mediapackage:role:arn")
+    def test_create_mediapackage_harvest_job(self):
+        """Should create a mediapackage harvest job."""
+        VideoFactory(
+            id="e19f1058-0bde-4f29-a5d8-e0b4ddf92b74",
+            live_info={
+                "medialive": {
+                    "input": {"id": "medialive_input1"},
+                    "channel": {"id": "medialive_channel1"},
+                },
+                "mediapackage": {
+                    "endpoints": {
+                        "hls": {"id": "mediapackage_endpoint1"},
+                    },
+                    "channel": {
+                        "id": "test_e19f1058-0bde-4f29-a5d8-e0b4ddf92b74_1569309880"
+                    },
+                },
+                "started_at": "1569309880",
+                "ended_at": "1569310880",
+            },
+        )
+
+        with Stubber(medialive_utils.mediapackage_client) as mediapackage_stubber:
+            mediapackage_stubber.add_response(
+                "create_harvest_job",
+                expected_params={
+                    "Id": "test_e19f1058-0bde-4f29-a5d8-e0b4ddf92b74_1569309880",
+                    "StartTime": "1569309880",
+                    "EndTime": "1569310880",
+                    "OriginEndpointId": "mediapackage_endpoint1",
+                    "S3Destination": {
+                        "BucketName": "test-marsha-destination",
+                        "ManifestKey": "e19f1058-0bde-4f29-a5d8-e0b4ddf92b74/cmaf/1569309880.m3u8",
+                        "RoleArn": "mediapackage:role:arn",
+                    },
+                },
+                service_response={},
+            )
+
+    def test_delete_aws_elemental_stack(self):
+        """Should delete all resources used during a live."""
+        video = VideoFactory(
+            live_info={
+                "medialive": {
+                    "input": {"id": "medialive_input1"},
+                    "channel": {"id": "medialive_channel1"},
+                },
+                "mediapackage": {
+                    "endpoints": {
+                        "hls": {"id": "mediapackage_endpoint1"},
+                    },
+                    "channel": {"id": "mediapackage_channel1"},
+                },
+            }
+        )
+
+        with Stubber(medialive_utils.medialive_client) as medialive_stubber:
+            medialive_stubber.add_response(
+                "delete_channel",
+                expected_params={"ChannelId": "medialive_channel1"},
+                service_response={},
+            )
+            medialive_stubber.add_response(
+                "describe_input",
+                expected_params={"InputId": "medialive_input1"},
+                service_response={"State": "DETACHED"},
+            )
+            medialive_stubber.add_response(
+                "delete_input",
+                expected_params={"InputId": "medialive_input1"},
+                service_response={},
+            )
+
+            medialive_utils.delete_aws_element_stack(video)

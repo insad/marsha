@@ -13,11 +13,11 @@ import { modelName } from '../../types/models';
 import { TimedText, uploadState } from '../../types/tracks';
 import { Maybe } from '../../utils/types';
 import { ActionLink } from '../ActionLink/ActionLink';
-import { ERROR_COMPONENT_ROUTE } from '../ErrorComponent/route';
+import { FULL_SCREEN_ERROR_ROUTE } from '../ErrorComponents/route';
 import { UPLOAD_FORM_ROUTE } from '../UploadForm/route';
-import { UploadStatusPicker } from '../UploadStatusPicker';
+import { ObjectStatusPicker } from '../ObjectStatusPicker';
 
-const { PENDING, PROCESSING, UPLOADING } = uploadState;
+const { PENDING, PROCESSING } = uploadState;
 
 const messages = defineMessages({
   delete: {
@@ -37,6 +37,11 @@ const messages = defineMessages({
       'Link text to upload a missing subtitle/transcript/captions item file.',
     id: 'components.TimedTextListItem.upload',
   },
+  download: {
+    defaultMessage: 'Download',
+    description: 'Link text to download a subtitle/transcript/captions item.',
+    id: 'components.TimedTextListItem.download',
+  },
 });
 
 const TimedTextListItemStyled = styled.div`
@@ -55,7 +60,7 @@ const TimedTextListItemLanguage = styled.div`
   flex-basis: 10rem;
 `;
 
-const UploadStatusPickerStyled = styled(UploadStatusPicker)`
+const ObjectStatusPickerStyled = styled(ObjectStatusPicker)`
   flex-basis: 6rem;
 `;
 
@@ -79,7 +84,7 @@ export const TimedTextListItem = ({ track }: TimedTextListItemProps) => {
   useEffect(() => {
     getChoices();
 
-    if ([PENDING, UPLOADING, PROCESSING].includes(track.upload_state)) {
+    if ([PENDING, PROCESSING].includes(track.upload_state)) {
       window.setTimeout(async () => {
         const result = await pollForTrack(modelName.TIMEDTEXTTRACKS, track.id);
         if (result === requestStatus.FAILURE) {
@@ -90,7 +95,7 @@ export const TimedTextListItem = ({ track }: TimedTextListItemProps) => {
   }, []);
 
   if (error) {
-    return <Redirect push to={ERROR_COMPONENT_ROUTE('notFound')} />;
+    return <Redirect push to={FULL_SCREEN_ERROR_ROUTE('notFound')} />;
   }
 
   const language: Maybe<LanguageChoice> =
@@ -107,7 +112,7 @@ export const TimedTextListItem = ({ track }: TimedTextListItemProps) => {
       <TimedTextListItemLanguage>
         {language ? language.label : track.language}
       </TimedTextListItemLanguage>
-      <UploadStatusPickerStyled state={track.upload_state} />
+      <ObjectStatusPickerStyled object={track} />
       <TimedTextListItemActions>
         <ActionLink
           color={'status-critical'}
@@ -122,6 +127,14 @@ export const TimedTextListItem = ({ track }: TimedTextListItemProps) => {
               : messages.replace)}
           />
         </Link>
+        {track.upload_state === uploadState.READY && track.source_url && (
+          <React.Fragment>
+            &nbsp;/&nbsp;
+            <a href={track.source_url}>
+              <FormattedMessage {...messages.download} />
+            </a>
+          </React.Fragment>
+        )}
       </TimedTextListItemActions>
     </TimedTextListItemStyled>
   );

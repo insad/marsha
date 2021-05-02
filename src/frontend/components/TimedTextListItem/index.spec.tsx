@@ -10,7 +10,7 @@ import fetchMock from 'fetch-mock';
 import React from 'react';
 
 import { TimedTextListItem } from '.';
-import { ERROR_COMPONENT_ROUTE } from '../../components/ErrorComponent/route';
+import { FULL_SCREEN_ERROR_ROUTE } from '../ErrorComponents/route';
 import { timedTextMode, uploadState } from '../../types/tracks';
 import { wrapInIntlProvider } from '../../utils/tests/intl';
 import { Deferred } from '../../utils/tests/Deferred';
@@ -59,7 +59,8 @@ describe('<TimedTextListItem />', () => {
               mode: timedTextMode.SUBTITLE,
               title: 'foo',
               upload_state: uploadState.READY,
-              url: 'https://example.com/timedtexttrack/42',
+              source_url: 'https://example.com/timedtext/source/42',
+              url: 'https://example.com/timedtext/42.vtt',
               video: '142',
             }}
           />,
@@ -69,6 +70,10 @@ describe('<TimedTextListItem />', () => {
 
     await screen.findByText('French');
     screen.getByText((content) => content.startsWith('Ready'));
+    const downloadLink = screen.getByRole('link', { name: 'Download' });
+    expect(downloadLink.getAttribute('href')).toEqual(
+      'https://example.com/timedtext/source/42',
+    );
     // No polling takes place as the track is already READY
     expect(
       fetchMock.called('/api/timedtexttracks/1/', { method: 'GET' }),
@@ -84,7 +89,8 @@ describe('<TimedTextListItem />', () => {
       mode: timedTextMode.SUBTITLE,
       title: 'foo',
       upload_state: uploadState.PROCESSING,
-      url: 'https://example.com/timedtexttrack/1',
+      source_url: 'https://example.com/timedtext/source/1',
+      url: 'https://example.com/timedtexttrack/1.vtt',
       video: '142',
     };
 
@@ -98,7 +104,7 @@ describe('<TimedTextListItem />', () => {
         wrapInIntlProvider(
           wrapInRouter(<TimedTextListItem track={track} />, [
             {
-              path: ERROR_COMPONENT_ROUTE(),
+              path: FULL_SCREEN_ERROR_ROUTE(),
               render: ({ match }) => (
                 <span>{`Error Component: ${match.params.code}`}</span>
               ),
@@ -146,11 +152,7 @@ describe('<TimedTextListItem />', () => {
   });
 
   it('renders & polls the track until it is READY', async () => {
-    for (const state of [
-      uploadState.PENDING,
-      uploadState.PROCESSING,
-      uploadState.UPLOADING,
-    ]) {
+    for (const state of [uploadState.PENDING, uploadState.PROCESSING]) {
       const track = {
         active_stamp: 28271937429,
         id: '1',
@@ -159,7 +161,8 @@ describe('<TimedTextListItem />', () => {
         mode: timedTextMode.SUBTITLE,
         title: 'foo',
         upload_state: state,
-        url: 'https://example.com/timedtexttrack/1',
+        source_url: 'https://example.com/timedtext/source/1',
+        url: 'https://example.com/timedtext/1.vtt',
         video: '142',
       };
       fetchMock.mock('/api/timedtexttracks/1/', JSON.stringify(track));
@@ -224,7 +227,8 @@ describe('<TimedTextListItem />', () => {
                 mode: timedTextMode.SUBTITLE,
                 title: 'foo',
                 upload_state: uploadState.READY,
-                url: 'https://example.com/timedtexttrack/42',
+                source_url: 'https://example.com/timedtext/source/42',
+                url: 'https://example.com/timedtext/42.vtt',
                 video: '142',
               }}
             />,

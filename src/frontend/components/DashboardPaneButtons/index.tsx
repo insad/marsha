@@ -5,10 +5,13 @@ import styled from 'styled-components';
 
 import { Document } from '../../types/file';
 import { modelName } from '../../types/models';
+import { flags } from '../../types/AppData';
 import { uploadState, Video } from '../../types/tracks';
+import { isFeatureEnabled } from '../../utils/isFeatureEnabled';
 import { DashboardVideoLiveConfigureButton } from '../DashboardVideoLiveConfigureButton';
 import { PLAYER_ROUTE } from '../routes';
 import { UPLOAD_FORM_ROUTE } from '../UploadForm/route';
+import { useUploadManager } from '../UploadManager';
 import { withLink } from '../withLink/withLink';
 
 const messages = {
@@ -85,6 +88,7 @@ export const DashboardPaneButtons = ({
   object,
   objectType,
 }: DashboardPaneButtonsProps) => {
+  const { uploadManagerState } = useUploadManager();
   const displayWatchBtn = object.upload_state === uploadState.READY;
 
   return (
@@ -94,13 +98,15 @@ export const DashboardPaneButtons = ({
       margin={'small'}
     >
       {objectType === modelName.VIDEOS &&
-        object.upload_state === uploadState.PENDING && (
+        object.upload_state === uploadState.PENDING &&
+        isFeatureEnabled(flags.VIDEO_LIVE) && (
           <DashboardVideoLiveConfigureButton video={object as Video} />
         )}
       <DashboardButtonWithLink
         label={
           <FormattedMessage
-            {...(object.upload_state === uploadState.PENDING
+            {...(object.upload_state === uploadState.PENDING &&
+            !uploadManagerState[object.id]
               ? messages[objectType].btnUploadFirst
               : messages[objectType].btnReplace)}
           />

@@ -41,39 +41,45 @@ def create_mediapackage_channel(key):
 
     """
     # Create mediapackage channel
-    channel = mediapackage_client.create_channel(Id=key)
+    channel = mediapackage_client.create_channel(
+        Id=f"{settings.AWS_BASE_NAME}_{key}",
+        Tags={"environment": settings.AWS_BASE_NAME},
+    )
 
     # Add primary U/P to SSM parameter store
     ssm_client.put_parameter(
-        Name=channel["HlsIngest"]["IngestEndpoints"][0]["Username"],
+        Name=f"{settings.AWS_BASE_NAME}_{channel['HlsIngest']['IngestEndpoints'][0]['Username']}",
         Description=f"{key} MediaPackage Primary Ingest Username",
         Value=channel["HlsIngest"]["IngestEndpoints"][0]["Password"],
         Type="String",
+        Tags=[{"Key": "environment", "Value": settings.AWS_BASE_NAME}],
     )
 
     # Add Secondary U/P to SSM Parameter store
     ssm_client.put_parameter(
-        Name=channel["HlsIngest"]["IngestEndpoints"][1]["Username"],
+        Name=f"{settings.AWS_BASE_NAME}_{channel['HlsIngest']['IngestEndpoints'][1]['Username']}",
         Description=f"{key} MediaPackage Secondary Ingest Username",
         Value=channel["HlsIngest"]["IngestEndpoints"][1]["Password"],
         Type="String",
+        Tags=[{"Key": "environment", "Value": settings.AWS_BASE_NAME}],
     )
 
-    # Create an endpoint. This endpoint will be used to watch the stream.
+    # Create a HLS endpoint. This endpoint will be used to watch the stream.
     hls_endpoint = mediapackage_client.create_origin_endpoint(
         ChannelId=channel["Id"],
-        Id=f"{channel['Id']}-hls",
-        ManifestName=f"{channel['Id']}-hls",
+        Id=f"{channel['Id']}_hls",
+        ManifestName=f"{channel['Id']}_hls",
         StartoverWindowSeconds=86400,
         TimeDelaySeconds=0,
         HlsPackage={
             "AdMarkers": "PASSTHROUGH",
             "IncludeIframeOnlyStream": False,
             "PlaylistType": "EVENT",
-            "PlaylistWindowSeconds": 5,
+            "PlaylistWindowSeconds": 10,
             "ProgramDateTimeIntervalSeconds": 0,
-            "SegmentDurationSeconds": 1,
+            "SegmentDurationSeconds": 4,
         },
+        Tags={"environment": settings.AWS_BASE_NAME},
     )
 
     return [channel, hls_endpoint]
@@ -121,12 +127,13 @@ def create_medialive_input(key):
     """
     medialive_input = medialive_client.create_input(
         InputSecurityGroups=[get_or_create_input_security_group()],
-        Name=key,
+        Name=f"{settings.AWS_BASE_NAME}_{key}",
         Type="RTMP_PUSH",
         Destinations=[
             {"StreamName": f"{key}-primary"},
             {"StreamName": f"{key}-secondary"},
         ],
+        Tags={"environment": settings.AWS_BASE_NAME},
     )
 
     return medialive_input
@@ -171,9 +178,12 @@ def create_medialive_channel(key, medialive_input, mediapackage_channel):
                 "Id": "destination1",
                 "Settings": [
                     {
-                        "PasswordParam": mediapackage_channel["HlsIngest"][
-                            "IngestEndpoints"
-                        ][0]["Username"],
+                        "PasswordParam": "{environment}_{username}".format(
+                            environment=settings.AWS_BASE_NAME,
+                            username=mediapackage_channel["HlsIngest"][
+                                "IngestEndpoints"
+                            ][0]["Username"],
+                        ),
                         "Url": mediapackage_channel["HlsIngest"]["IngestEndpoints"][0][
                             "Url"
                         ],
@@ -182,9 +192,12 @@ def create_medialive_channel(key, medialive_input, mediapackage_channel):
                         ][0]["Username"],
                     },
                     {
-                        "PasswordParam": mediapackage_channel["HlsIngest"][
-                            "IngestEndpoints"
-                        ][1]["Username"],
+                        "PasswordParam": "{environment}_{username}".format(
+                            environment=settings.AWS_BASE_NAME,
+                            username=mediapackage_channel["HlsIngest"][
+                                "IngestEndpoints"
+                            ][1]["Username"],
+                        ),
                         "Url": mediapackage_channel["HlsIngest"]["IngestEndpoints"][1][
                             "Url"
                         ],
@@ -195,9 +208,10 @@ def create_medialive_channel(key, medialive_input, mediapackage_channel):
                 ],
             }
         ],
-        Name=key,
+        Name=f"{settings.AWS_BASE_NAME}_{key}",
         RoleArn=settings.AWS_MEDIALIVE_ROLE_ARN,
         EncoderSettings=encoder_settings,
+        Tags={"environment": settings.AWS_BASE_NAME},
     )
 
     return medialive_channel
@@ -255,3 +269,46 @@ def start_live_channel(channel_id):
 def stop_live_channel(channel_id):
     """Stop an existing medialive channel."""
     medialive_client.stop_channel(ChannelId=channel_id)
+
+
+def create_mediapackage_harvest_job(video):
+    """Create a mediapackage harvest job."""
+    hls_endpoint = (
+        video.live_info.get("mediapackage").get("endpoints").get("hls").get("id")
+    )
+    channel_id = video.live_info.get("mediapackage").get("channel").get("id")
+
+    # split channel id to take the stamp in it {env}_{pk}_{stamp}
+    elements = channel_id.split("_")
+
+    mediapackage_client.create_harvest_job(
+        Id=channel_id,
+        StartTime=video.live_info.get("started_at"),
+        EndTime=video.live_info.get("stopped_at"),
+        OriginEndpointId=hls_endpoint,
+        S3Destination={
+            "BucketName": settings.AWS_DESTINATION_BUCKET_NAME,
+            "ManifestKey": f"{video.pk}/cmaf/{elements[2]}.m3u8",
+            "RoleArn": settings.AWS_MEDIAPACKAGE_HARVEST_JOB_ARN,
+        },
+    )
+
+
+def delete_aws_element_stack(video):
+    """Delete all AWS elemental.
+
+    Instances used:
+        - medialive input and channel
+    """
+    # Medialive
+    # First delete the channel
+    medialive_client.delete_channel(
+        ChannelId=video.live_info.get("medialive").get("channel").get("id")
+    )
+
+    # Once channel deleted we have to wait until input is detached
+    input_waiter = medialive_client.get_waiter("input_detached")
+    input_waiter.wait(InputId=video.live_info.get("medialive").get("input").get("id"))
+    medialive_client.delete_input(
+        InputId=video.live_info.get("medialive").get("input").get("id")
+    )

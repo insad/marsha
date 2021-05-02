@@ -16,7 +16,7 @@ from .test_api_video import RSA_KEY_MOCK
 
 
 # We don't enforce arguments documentation in tests
-# pylint: disable=unused-argument
+# pylint: disable=unused-argument,too-many-lines
 
 
 class TimedTextTrackAPITest(TestCase):
@@ -147,6 +147,65 @@ class TimedTextTrackAPITest(TestCase):
         """A token user associated to a video can read a timed text track related to this video."""
         timed_text_track = TimedTextTrackFactory(
             video__pk="b8d40ed7-95b8-4848-98c9-50728dfee25d",
+            video__playlist__title="foo",
+            mode="cc",
+            language="fr",
+            uploaded_on=datetime(2018, 8, 8, tzinfo=pytz.utc),
+            upload_state="ready",
+            extension="srt",
+        )
+
+        jwt_token = AccessToken()
+        jwt_token.payload["resource_id"] = str(timed_text_track.video.id)
+        jwt_token.payload["roles"] = [random.choice(["instructor", "administrator"])]
+        jwt_token.payload["permissions"] = {"can_update": True}
+
+        # Get the timed text track using the JWT token
+        response = self.client.get(
+            "/api/timedtexttracks/{!s}/".format(timed_text_track.id),
+            HTTP_AUTHORIZATION="Bearer {!s}".format(jwt_token),
+        )
+        self.assertEqual(response.status_code, 200)
+        content = json.loads(response.content)
+
+        self.assertEqual(
+            content,
+            {
+                "active_stamp": "1533686400",
+                "is_ready_to_show": True,
+                "id": str(timed_text_track.id),
+                "mode": "cc",
+                "language": "fr",
+                "upload_state": "ready",
+                "source_url": (
+                    "https://abc.cloudfront.net/b8d40ed7-95b8-4848-98c9-50728dfee25d/"
+                    "timedtext/source/1533686400_fr_cc?response-content-disposition=a"
+                    "ttachment%3B+filename%3Dfoo_1533686400.srt"
+                ),
+                "url": (
+                    "https://abc.cloudfront.net/b8d40ed7-95b8-4848-98c9-50728dfee25d/"
+                    "timedtext/1533686400_fr_cc.vtt"
+                ),
+                "video": str(timed_text_track.video.id),
+            },
+        )
+
+        # Try getting another timed_text_track
+        other_timed_text_track = TimedTextTrackFactory()
+        response = self.client.get(
+            "/api/timedtexttracks/{!s}/".format(other_timed_text_track.id),
+            HTTP_AUTHORIZATION="Bearer {!s}".format(jwt_token),
+        )
+        self.assertEqual(response.status_code, 404)
+        content = json.loads(response.content)
+        self.assertEqual(content, {"detail": "Not found."})
+
+    @override_settings(CLOUDFRONT_SIGNED_URLS_ACTIVE=False)
+    def test_api_timed_text_track_without_extension_read_detail_token_user(self):
+        """A timed text track without extension should return empty source url."""
+        timed_text_track = TimedTextTrackFactory(
+            video__pk="b8d40ed7-95b8-4848-98c9-50728dfee25d",
+            video__playlist__title="foo",
             mode="cc",
             language="fr",
             uploaded_on=datetime(2018, 8, 8, tzinfo=pytz.utc),
@@ -175,6 +234,7 @@ class TimedTextTrackAPITest(TestCase):
                 "mode": "cc",
                 "language": "fr",
                 "upload_state": "ready",
+                "source_url": None,
                 "url": (
                     "https://abc.cloudfront.net/b8d40ed7-95b8-4848-98c9-50728dfee25d/"
                     "timedtext/1533686400_fr_cc.vtt"
@@ -198,10 +258,12 @@ class TimedTextTrackAPITest(TestCase):
         """Admin user associated to a video can read a timed text track related to this video."""
         timed_text_track = TimedTextTrackFactory(
             video__pk="b8d40ed7-95b8-4848-98c9-50728dfee25d",
+            video__playlist__title="foo",
             mode="cc",
             language="fr",
             uploaded_on=datetime(2018, 8, 8, tzinfo=pytz.utc),
             upload_state="ready",
+            extension="srt",
         )
 
         jwt_token = AccessToken()
@@ -226,9 +288,14 @@ class TimedTextTrackAPITest(TestCase):
                 "mode": "cc",
                 "language": "fr",
                 "upload_state": "ready",
+                "source_url": (
+                    "https://abc.cloudfront.net/b8d40ed7-95b8-4848-98c9-50728dfee25d/timedtext/"
+                    "source/1533686400_fr_cc?response-content-disposition=attachment%3B+filenam"
+                    "e%3Dfoo_1533686400.srt"
+                ),
                 "url": (
-                    "https://abc.cloudfront.net/b8d40ed7-95b8-4848-98c9-50728dfee25d/"
-                    "timedtext/1533686400_fr_cc.vtt"
+                    "https://abc.cloudfront.net/b8d40ed7-95b8-4848-98c9-50728dfee25d/timedtext/"
+                    "1533686400_fr_cc.vtt"
                 ),
                 "video": str(timed_text_track.video.id),
             },
@@ -311,10 +378,12 @@ class TimedTextTrackAPITest(TestCase):
         """Activating signed urls should add Cloudfront query string authentication parameters."""
         timed_text_track = TimedTextTrackFactory(
             video__pk="b8d40ed7-95b8-4848-98c9-50728dfee25d",
+            video__playlist__title="foo",
             mode="cc",
             language="fr",
             uploaded_on=datetime(2018, 8, 8, tzinfo=pytz.utc),
             upload_state="ready",
+            extension="srt",
         )
         jwt_token = AccessToken()
         jwt_token.payload["resource_id"] = str(timed_text_track.video.id)
@@ -335,13 +404,26 @@ class TimedTextTrackAPITest(TestCase):
         self.assertEqual(
             content["url"],
             (
-                "https://abc.cloudfront.net/b8d40ed7-95b8-4848-98c9-50728dfee25d/timedtext/"
-                "1533686400_fr_cc.vtt?Expires=1533693600&Signature=CWr09YDiSe-j2sKML3f29nKfjCdF8n"
-                "UMUeL1~yHPkMkQpxDXGc5mnKDKkelvzLyAhIUmEi1CtZgG18siFD4RzDVCNufOINxKCWzKYmVjN67PJA"
-                "itNi2nUazFhOA-QODJ03gEpCPgea7ntwgJemOtqkd1uj7kgay~HeslK1L2HEIRHjbjaYEoCldCISC8l2"
-                "FIh~fFryFv9Ptu9ajm4OfIrpc2~oDqe5QkGotQ7IrcZlq8MqMte1tbDaGkaQD-NpURCj7rmkt8vkqpWi"
-                "j-IkWxzNWyX38SL1bg2Co762Ab~YKpdiS8jf-WppVS31cCehf1bPdsqypBzSFMCqORZvEBtw__&"
-                "Key-Pair-Id=cloudfront-access-key-id"
+                "https://abc.cloudfront.net/b8d40ed7-95b8-4848-98c9-50728dfee25d/timedtext"
+                "/1533686400_fr_cc.vtt?Expires=1533693600&Signature=CWr09YDiSe-j2sKML3f29n"
+                "KfjCdF8nUMUeL1~yHPkMkQpxDXGc5mnKDKkelvzLyAhIUmEi1CtZgG18siFD4RzDVCNufOINx"
+                "KCWzKYmVjN67PJAitNi2nUazFhOA-QODJ03gEpCPgea7ntwgJemOtqkd1uj7kgay~HeslK1L2"
+                "HEIRHjbjaYEoCldCISC8l2FIh~fFryFv9Ptu9ajm4OfIrpc2~oDqe5QkGotQ7IrcZlq8MqMte"
+                "1tbDaGkaQD-NpURCj7rmkt8vkqpWij-IkWxzNWyX38SL1bg2Co762Ab~YKpdiS8jf-WppVS31"
+                "cCehf1bPdsqypBzSFMCqORZvEBtw__&Key-Pair-Id=cloudfront-access-key-id"
+            ),
+        )
+        self.assertEqual(
+            content["source_url"],
+            (
+                "https://abc.cloudfront.net/b8d40ed7-95b8-4848-98c9-50728dfee25d/timedtext"
+                "/source/1533686400_fr_cc?response-content-disposition=attachment%3B+filen"
+                "ame%3Dfoo_1533686400.srt&Expires=1533693600&Signature=Fcb5y9wuTPBPQ2PETBZ"
+                "qAnlMYKTHWkv9fCm5uItq4t28GMMtITGKjpjzlnnUmRvlP0DI6IUjDKXWkZEFN8mM70z4oSn9"
+                "NSh9OLIOG0mAyXRq3XNPh4P0UG8RBkbq2JLSJHgzsDy~AS06LS6i14IQonXoTLsvXGoELNVuN"
+                "sIImqHh2jeH0qaOo34pTWc~GXROYKwwYGEhkmuI1LhX5tJ14aFAEq9ggcm1YRu-aFabQj6yin"
+                "ZkZAgfEqIOScVyG78h5NNDWdU4JbPoQgUr-r97uN91FuoZYn2nJDTxYS0wQQVAc5LGNFB4pjq"
+                "57uxu-aKIRDzKaxOiTrOn75GztmV4OA__&Key-Pair-Id=cloudfront-access-key-id"
             ),
         )
 
@@ -386,12 +468,15 @@ class TimedTextTrackAPITest(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         timed_text_track_list = json.loads(response.content)
-        self.assertEqual(len(timed_text_track_list), 2)
+        self.assertEqual(len(timed_text_track_list["results"]), 2)
+        self.assertEqual(timed_text_track_list["count"], 2)
         self.assertTrue(
-            str(timed_text_track_one.id) in (ttt["id"] for ttt in timed_text_track_list)
+            str(timed_text_track_one.id)
+            in (ttt["id"] for ttt in timed_text_track_list["results"])
         )
         self.assertTrue(
-            str(timed_text_track_two.id) in (ttt["id"] for ttt in timed_text_track_list)
+            str(timed_text_track_two.id)
+            in (ttt["id"] for ttt in timed_text_track_list["results"])
         )
 
     def test_api_timed_text_track_read_list_staff_or_user(self):
@@ -435,6 +520,7 @@ class TimedTextTrackAPITest(TestCase):
                 "mode": "st",
                 "language": "fr",
                 "upload_state": "pending",
+                "source_url": None,
                 "url": None,
                 "video": "f8c30d0d-2bb4-440d-9e8d-f4b231511f1f",
             },

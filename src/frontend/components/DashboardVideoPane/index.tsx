@@ -1,6 +1,6 @@
 import { Box } from 'grommet';
 import React, { useEffect, useState } from 'react';
-import { defineMessages, FormattedMessage } from 'react-intl';
+import { defineMessages, FormattedMessage, useIntl } from 'react-intl';
 import { Redirect } from 'react-router';
 import styled from 'styled-components';
 
@@ -8,27 +8,86 @@ import { appData } from '../../data/appData';
 import { useVideo } from '../../data/stores/useVideo';
 import { API_ENDPOINT } from '../../settings';
 import { modelName } from '../../types/models';
-import { liveState, uploadState, Video } from '../../types/tracks';
+import { uploadState, Video } from '../../types/tracks';
 import { report } from '../../utils/errors/report';
 import { DashboardInternalHeading } from '../Dashboard/DashboardInternalHeading';
 import { DashboardObjectProgress } from '../DashboardObjectProgress';
 import { DashboardPaneButtons } from '../DashboardPaneButtons';
-import { DashboardPaneHelptext } from '../DashboardPaneHelptext';
 import { DashboardThumbnail } from '../DashboardThumbnail';
+import { DashboardVideoHarvested } from '../DashboardVideoHarvested';
 import { DashboardVideoLive } from '../DashboardVideoLive';
 import { DashboardVideoPaneDownloadOption } from '../DashboardVideoPaneDownloadOption';
 import { DashboardVideoPaneTranscriptOption } from '../DashboardVideoPaneTranscriptOption';
-import { ERROR_COMPONENT_ROUTE } from '../ErrorComponent/route';
-import { UploadStatusPicker } from '../UploadStatusPicker';
+import { FULL_SCREEN_ERROR_ROUTE } from '../ErrorComponents/route';
+import { ObjectStatusPicker } from '../ObjectStatusPicker';
+import { UploadManagerStatus, useUploadManager } from '../UploadManager';
 
-const { ERROR, PENDING, PROCESSING, READY, UPLOADING } = uploadState;
+const {
+  DELETED,
+  ERROR,
+  HARVESTED,
+  HARVESTING,
+  PENDING,
+  PROCESSING,
+  READY,
+} = uploadState;
 
 const messages = defineMessages({
+  [DELETED]: {
+    defaultMessage: 'This video is definitely deleted.',
+    description: 'Dashboard helptext for when the video is in DELETED state',
+    id: 'components.DashboardVideoPane.helpTextDeleted',
+  },
+  [ERROR]: {
+    defaultMessage:
+      'There was an error with your video. Retry or upload another one.',
+    description:
+      'Dashboard helptext for when the video failed to upload or get processed.',
+    id: 'components.DashboardVideoPane.helptextError',
+  },
+  [HARVESTED]: {
+    defaultMessage:
+      'The video has been converted in VOD. You must explicitly publish the video by clicking the button below.',
+    description: 'Dashboard helptext to ask user to finish VOD conversion',
+    id: 'components.DashboardVideoPane.helptextHarvested',
+  },
+  [HARVESTING]: {
+    defaultMessage:
+      'Your video is currently converting from a live video to a VOD. This may take up to an hour. You can close the window and come back later.',
+    description:
+      'Dashboard helptext to warn users not to wait for video processing in front of this page.',
+    id: 'components.DashboardVideoPane.helptextHarvesting',
+  },
+  [PENDING]: {
+    defaultMessage: 'There is currently no video to display.',
+    description:
+      'Dashboard helptext for the case when there is no existing video nor anything in progress.',
+    id: 'components.DashboardVideoPane.helptextPending',
+  },
+  [PROCESSING]: {
+    defaultMessage:
+      'Your video is currently processing. This may take up to an hour. You can close the window and come back later.',
+    description:
+      'Dashboard helptext to warn users not to wait for video processing in front of this page.',
+    id: 'components.DashboardVideoPane.helptextProcessing',
+  },
+  [READY]: {
+    defaultMessage: 'Your video is ready to play.',
+    description: 'Dashboard helptext for ready-to-play videos.',
+    id: 'components.DashboardVideoPane.helptextReady',
+  },
   title: {
     defaultMessage: 'Video status',
     description:
       'Subtitle for the video part of the dashboard (right now the only part until we add timed text tracks).',
     id: 'components.DashboardVideoPane.title',
+  },
+  uploadingVideo: {
+    defaultMessage:
+      'Upload in progress... Please do not close or reload this page.',
+    description:
+      'Dashboard helptext to warn user not to navigate away during video upload.',
+    id: 'components.DashboardVideoPane.helptextUploading',
   },
 });
 
@@ -44,16 +103,29 @@ const DashboardVideoPaneInternalHeading = styled(DashboardInternalHeading)`
   padding: 0 1rem 0 0;
 `;
 
+const CommonStatusLine = ({ video }: { video: Video }) => (
+  <Box align={'center'} direction={'row'}>
+    <DashboardVideoPaneInternalHeading>
+      <FormattedMessage {...messages.title} />
+    </DashboardVideoPaneInternalHeading>
+    <ObjectStatusPicker object={video} />
+  </Box>
+);
+
 /** Props shape for the DashboardVideoPane component. */
 interface DashboardVideoPaneProps {
   video: Video;
 }
 
 export const DashboardVideoPane = ({ video }: DashboardVideoPaneProps) => {
+  const intl = useIntl();
   const [error, setError] = useState(false);
+
+  const { uploadManagerState } = useUploadManager();
   const { updateVideo } = useVideo((state) => ({
     updateVideo: state.addResource,
   }));
+
   const pollForVideo = async () => {
     try {
       const response = await fetch(`${API_ENDPOINT}/videos/${video.id}/`, {
@@ -83,7 +155,13 @@ export const DashboardVideoPane = ({ video }: DashboardVideoPaneProps) => {
   };
 
   useEffect(() => {
-    if ([PENDING, UPLOADING, PROCESSING].includes(video.upload_state)) {
+    if (
+      video.upload_state === PROCESSING ||
+      (video.upload_state === PENDING &&
+        (uploadManagerState[video.id]?.status ===
+          UploadManagerStatus.UPLOADING ||
+          uploadManagerState[video.id]?.status === UploadManagerStatus.SUCCESS))
+    ) {
       const interval = window.setInterval(() => pollForVideo(), 1000 * 60);
 
       return () => {
@@ -94,21 +172,12 @@ export const DashboardVideoPane = ({ video }: DashboardVideoPaneProps) => {
   }, []);
 
   if (error) {
-    return <Redirect push to={ERROR_COMPONENT_ROUTE('notFound')} />;
+    return <Redirect push to={FULL_SCREEN_ERROR_ROUTE('notFound')} />;
   }
 
   if (!video.is_ready_to_show && video.upload_state === ERROR) {
-    return <Redirect push to={ERROR_COMPONENT_ROUTE('upload')} />;
+    return <Redirect push to={FULL_SCREEN_ERROR_ROUTE('upload')} />;
   }
-
-  const commonStatusLine = (
-    <Box align={'center'} direction={'row'}>
-      <DashboardVideoPaneInternalHeading>
-        <FormattedMessage {...messages.title} />
-      </DashboardVideoPaneInternalHeading>
-      <UploadStatusPicker state={video.upload_state} />
-    </Box>
-  );
 
   switch (video.upload_state) {
     case PENDING:
@@ -117,7 +186,7 @@ export const DashboardVideoPane = ({ video }: DashboardVideoPaneProps) => {
           <DashboardVideoPaneInnerContainer>
             <Box direction={'row'}>
               <Box basis={'1/2'} margin={'small'}>
-                {commonStatusLine}
+                <CommonStatusLine video={video} />
               </Box>
               <Box basis={'1/2'} margin={'small'}>
                 <DashboardVideoLive video={video} />
@@ -125,14 +194,30 @@ export const DashboardVideoPane = ({ video }: DashboardVideoPaneProps) => {
             </Box>
           </DashboardVideoPaneInnerContainer>
         );
+      } else if (
+        uploadManagerState[video.id]?.status === UploadManagerStatus.UPLOADING
+      ) {
+        return (
+          <DashboardVideoPaneInnerContainer>
+            <CommonStatusLine video={video} />
+            <DashboardObjectProgress objectId={video.id} />
+            {intl.formatMessage(messages.uploadingVideo)}
+          </DashboardVideoPaneInnerContainer>
+        );
+      } else if (
+        uploadManagerState[video.id]?.status === UploadManagerStatus.SUCCESS
+      ) {
+        return (
+          <DashboardVideoPaneInnerContainer>
+            <CommonStatusLine video={video} />
+            {intl.formatMessage(messages[PROCESSING])}
+          </DashboardVideoPaneInnerContainer>
+        );
       } else {
         return (
           <DashboardVideoPaneInnerContainer>
-            {commonStatusLine}
-            <DashboardPaneHelptext
-              objectType={modelName.VIDEOS}
-              state={video.upload_state}
-            />
+            <CommonStatusLine video={video} />
+            {intl.formatMessage(messages[PENDING])}
             <DashboardPaneButtons
               object={video}
               objectType={modelName.VIDEOS}
@@ -140,27 +225,15 @@ export const DashboardVideoPane = ({ video }: DashboardVideoPaneProps) => {
           </DashboardVideoPaneInnerContainer>
         );
       }
-    case UPLOADING:
-      return (
-        <DashboardVideoPaneInnerContainer>
-          {commonStatusLine}
-          <DashboardObjectProgress objectId={video.id} />
-          <DashboardPaneHelptext
-            objectType={modelName.VIDEOS}
-            state={video.upload_state}
-          />
-        </DashboardVideoPaneInnerContainer>
-      );
 
     case PROCESSING:
     case ERROR:
+    case DELETED:
+    case HARVESTING:
       return (
         <DashboardVideoPaneInnerContainer>
-          {commonStatusLine}
-          <DashboardPaneHelptext
-            objectType={modelName.VIDEOS}
-            state={video.upload_state}
-          />
+          <CommonStatusLine video={video} />
+          {intl.formatMessage(messages[video.upload_state])}
         </DashboardVideoPaneInnerContainer>
       );
 
@@ -169,11 +242,8 @@ export const DashboardVideoPane = ({ video }: DashboardVideoPaneProps) => {
         <DashboardVideoPaneInnerContainer>
           <Box direction={'row'}>
             <Box basis={'1/2'} margin={'small'}>
-              {commonStatusLine}
-              <DashboardPaneHelptext
-                objectType={modelName.VIDEOS}
-                state={video.upload_state}
-              />
+              <CommonStatusLine video={video} />
+              {intl.formatMessage(messages[READY])}
               <DashboardVideoPaneDownloadOption video={video} />
               <DashboardVideoPaneTranscriptOption video={video} />
             </Box>
@@ -182,6 +252,21 @@ export const DashboardVideoPane = ({ video }: DashboardVideoPaneProps) => {
             </Box>
           </Box>
           <DashboardPaneButtons object={video} objectType={modelName.VIDEOS} />
+        </DashboardVideoPaneInnerContainer>
+      );
+
+    case HARVESTED:
+      return (
+        <DashboardVideoPaneInnerContainer>
+          <Box direction={'column'}>
+            <Box basis={'1/2'} margin={'small'}>
+              <CommonStatusLine video={video} />
+              {intl.formatMessage(messages[video.upload_state])}
+            </Box>
+            <Box basis={'1/2'} margin={'small'}>
+              <DashboardVideoHarvested video={video} />
+            </Box>
+          </Box>
         </DashboardVideoPaneInnerContainer>
       );
   }

@@ -16,27 +16,19 @@ PATTERN
 }
 
 resource "aws_cloudwatch_event_target" "marsha_encode_complete_target" {
-  rule      = "${aws_cloudwatch_event_rule.marsha_encode_complete_rule.name}"
+  rule      = aws_cloudwatch_event_rule.marsha_encode_complete_rule.name
   target_id = "check_foo"
-  arn       = "${aws_lambda_function.marsha_complete_lambda.arn}"
+  arn       = aws_lambda_function.marsha_complete_lambda.arn
 }
 
-resource "aws_cloudwatch_event_rule" "marsha_medialive_channel_state_change" {
-  name        = "${terraform.workspace}-marsha-medialive-channel-state-change"
-  description = "Fires each time a medialive channel state changes."
+# FARGATE LOG GROUP
+###################
 
-  event_pattern = <<PATTERN
-{
-  "source": [
-    "aws.medialive"
-  ]
-}
-PATTERN
-}
+resource "aws_cloudwatch_log_group" "fargate_ffmpeg_transmux" {
+  name = "/ecs/${terraform.workspace}-fargate-ffmpeg-transmux"
 
-
-resource "aws_cloudwatch_event_target" "marsha_medialive_channel_state_change_target" {
-  rule      = "${aws_cloudwatch_event_rule.marsha_medialive_channel_state_change.name}"
-  target_id = "medialive"
-  arn       = "${aws_lambda_function.marsha_medialive_lambda.arn}"
+  tags = {
+    Environment = terraform.workspace
+    Application = "serviceA"
+  }
 }

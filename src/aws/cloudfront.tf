@@ -1,6 +1,6 @@
 locals {
   s3_destination_origin_id = "marsha-destination-origin"
-  s3_static_origin_id = "marsha-static-origin"
+  static_origin_id = "marsha-static-origin"
 }
 
 # Create an origin access identity that will allow CloudFront to access S3
@@ -11,35 +11,39 @@ resource "aws_cloudfront_origin_access_identity" "marsha_oai" {
 }
 
 resource "aws_cloudfront_distribution" "marsha_cloudfront_distribution" {
-  # Origin for the static S3 bucket
-  origin {
-    domain_name = "${aws_s3_bucket.marsha_static.bucket_domain_name}"
-    origin_id   = "${local.s3_static_origin_id}"
-
-    s3_origin_config {
-      origin_access_identity = "${aws_cloudfront_origin_access_identity.marsha_oai.cloudfront_access_identity_path}"
-    }
-  }
-
   # Origin for the destination S3 bucket
   origin {
-    domain_name = "${aws_s3_bucket.marsha_destination.bucket_domain_name}"
-    origin_id   = "${local.s3_destination_origin_id}"
+    domain_name = aws_s3_bucket.marsha_destination.bucket_domain_name
+    origin_id   = local.s3_destination_origin_id
 
     s3_origin_config {
-      origin_access_identity = "${aws_cloudfront_origin_access_identity.marsha_oai.cloudfront_access_identity_path}"
+      origin_access_identity = aws_cloudfront_origin_access_identity.marsha_oai.cloudfront_access_identity_path
     }
   }
 
-  enabled         = true
-  is_ipv6_enabled = true
+  # Origin for static distribution
+  origin {
+    domain_name = trimprefix(var.marsha_base_url, "https://")
+    origin_id   = local.static_origin_id
+
+    custom_origin_config {
+      http_port = 80
+      https_port = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols = ["SSLv3", "TLSv1", "TLSv1.1", "TLSv1.2"]
+    }
+  }
+
+  enabled             = true
+  is_ipv6_enabled     = true
+  wait_for_deployment = false
 
   # Destination bucket: allow public access by default
   default_cache_behavior {
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD", "OPTIONS"]
-    target_origin_id = "${local.s3_destination_origin_id}"
-    trusted_signers  = ["${var.cloudfront_trusted_signer_id}"]
+    target_origin_id = local.s3_destination_origin_id
+    trusted_signers  = [var.cloudfront_trusted_signer_id]
 
     forwarded_values {
       query_string = false
@@ -62,8 +66,8 @@ resource "aws_cloudfront_distribution" "marsha_cloudfront_distribution" {
     path_pattern     = "*/mp4/*"
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD", "OPTIONS"]
-    target_origin_id = "${local.s3_destination_origin_id}"
-    trusted_signers  = ["${var.cloudfront_trusted_signer_id}"]
+    target_origin_id = local.s3_destination_origin_id
+    trusted_signers  = [var.cloudfront_trusted_signer_id]
 
     forwarded_values {
       query_string = true
@@ -85,8 +89,8 @@ resource "aws_cloudfront_distribution" "marsha_cloudfront_distribution" {
     path_pattern     = "*/document/*"
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD", "OPTIONS"]
-    target_origin_id = "${local.s3_destination_origin_id}"
-    trusted_signers  = ["${var.cloudfront_trusted_signer_id}"]
+    target_origin_id = local.s3_destination_origin_id
+    trusted_signers  = [var.cloudfront_trusted_signer_id]
 
     forwarded_values {
       query_string = true
@@ -109,11 +113,11 @@ resource "aws_cloudfront_distribution" "marsha_cloudfront_distribution" {
     path_pattern     = "*/timedtext/*"
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD", "OPTIONS"]
-    target_origin_id = "${local.s3_destination_origin_id}"
-    trusted_signers  = ["${var.cloudfront_trusted_signer_id}"]
+    target_origin_id = local.s3_destination_origin_id
+    trusted_signers  = [var.cloudfront_trusted_signer_id]
 
     forwarded_values {
-      query_string = false
+      query_string = true
       headers = ["Access-Control-Request-Headers", "Access-Control-Request-Method", "Origin"]
 
       cookies {
@@ -132,7 +136,7 @@ resource "aws_cloudfront_distribution" "marsha_cloudfront_distribution" {
     path_pattern     = "*/thumbnails/*"
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD", "OPTIONS"]
-    target_origin_id = "${local.s3_destination_origin_id}"
+    target_origin_id = local.s3_destination_origin_id
 
     forwarded_values {
       query_string = false
@@ -154,7 +158,7 @@ resource "aws_cloudfront_distribution" "marsha_cloudfront_distribution" {
     path_pattern     = "*/cmaf/*"
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD", "OPTIONS"]
-    target_origin_id = "${local.s3_destination_origin_id}"
+    target_origin_id = local.s3_destination_origin_id
 
     forwarded_values {
       query_string = false
@@ -176,7 +180,7 @@ resource "aws_cloudfront_distribution" "marsha_cloudfront_distribution" {
     path_pattern     = "*/previews/*"
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD", "OPTIONS"]
-    target_origin_id = "${local.s3_destination_origin_id}"
+    target_origin_id = local.s3_destination_origin_id
 
     forwarded_values {
       query_string = false
@@ -199,11 +203,16 @@ resource "aws_cloudfront_distribution" "marsha_cloudfront_distribution" {
     path_pattern     = "/static/*"
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD", "OPTIONS"]
-    target_origin_id = "${local.s3_static_origin_id}"
+    target_origin_id = local.static_origin_id
 
     forwarded_values {
       query_string = false
-      headers = ["Access-Control-Request-Headers", "Access-Control-Request-Method", "Origin"]
+      headers = [
+        "Access-Control-Request-Headers",
+        "Access-Control-Request-Method",
+        "Origin",
+        "Accept-Encoding"
+      ]
 
       cookies {
         forward = "none"
@@ -217,7 +226,7 @@ resource "aws_cloudfront_distribution" "marsha_cloudfront_distribution" {
     viewer_protocol_policy = "redirect-to-https"
   }
 
-  price_class = "${lookup(var.cloudfront_price_class, terraform.workspace, "PriceClass_100")}"
+  price_class = lookup(var.cloudfront_price_class, terraform.workspace, "PriceClass_100")
 
   restrictions {
     geo_restriction {
@@ -225,8 +234,8 @@ resource "aws_cloudfront_distribution" "marsha_cloudfront_distribution" {
     }
   }
 
-  tags {
-    Environment = "${terraform.workspace}"
+  tags = {
+    Environment = terraform.workspace
   }
 
   viewer_certificate {

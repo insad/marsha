@@ -1,18 +1,18 @@
 """Test the LTI interconnection with Open edX."""
 from unittest import mock
-from urllib.parse import unquote
 import uuid
 
 from django.test import RequestFactory, TestCase, override_settings
+from django.urls import reverse
 
 import oauth2
-from oauthlib import oauth1
 from pylti.common import LTIException, LTIOAuthServer
 
 from ..factories import ConsumerSiteLTIPassportFactory, PlaylistLTIPassportFactory
 from ..lti import LTI
 from ..lti.utils import get_or_create_resource
 from ..models import Video
+from .utils import generate_passport_and_signed_lti_parameters
 
 
 # We don't enforce arguments documentation in tests
@@ -33,39 +33,17 @@ class LTITestCase(TestCase):
         This test uses the oauthlib library to simulate an LTI launch request and make sure
         that our LTI verification works.
         """
-        passport = ConsumerSiteLTIPassportFactory(consumer_site__domain="testserver")
-        lti_parameters = {
-            "resource_link_id": "df7",
-            "context_id": "course-v1:ufr+mathematics+0001",
-            "roles": "Instructor",
-        }
         resource_id = uuid.uuid4()
         url = "http://testserver/lti/videos/{!s}".format(resource_id)
-        client = oauth1.Client(
-            client_key=passport.oauth_consumer_key, client_secret=passport.shared_secret
-        )
-        # Compute Authorization header which looks like:
-        # Authorization: OAuth oauth_nonce="80966668944732164491378916897",
-        # oauth_timestamp="1378916897", oauth_version="1.0", oauth_signature_method="HMAC-SHA1",
-        # oauth_consumer_key="", oauth_signature="frVp4JuvT1mVXlxktiAUjQ7%2F1cw%3D"
-        _uri, headers, _body = client.sign(
-            url,
-            http_method="POST",
-            body=lti_parameters,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        lti_parameters, passport = generate_passport_and_signed_lti_parameters(
+            url=url,
+            lti_parameters={
+                "resource_link_id": "df7",
+                "context_id": "course-v1:ufr+mathematics+0001",
+                "roles": "Instructor",
+            },
         )
 
-        # Parse headers to pass to template as part of context:
-        oauth_dict = dict(
-            param.strip().replace('"', "").split("=")
-            for param in headers["Authorization"].split(",")
-        )
-
-        signature = oauth_dict["oauth_signature"]
-        oauth_dict["oauth_signature"] = unquote(signature)
-        oauth_dict["oauth_nonce"] = oauth_dict.pop("OAuth oauth_nonce")
-
-        lti_parameters.update(oauth_dict)
         request = self.factory.post(
             url, lti_parameters, HTTP_REFERER="https://testserver"
         )
@@ -74,9 +52,9 @@ class LTITestCase(TestCase):
         self.assertEqual(lti.get_consumer_site(), passport.consumer_site)
 
         # If we alter the signature (e.g. add "a" to it), the verification should fail
-        oauth_dict["oauth_signature"] = "{:s}a".format(signature)
-
-        lti_parameters.update(oauth_dict)
+        lti_parameters["oauth_signature"] = "{:s}a".format(
+            lti_parameters["oauth_signature"]
+        )
         request = self.factory.post(url, lti_parameters)
         lti = LTI(request, resource_id)
         with self.assertRaises(LTIException):
@@ -87,48 +65,26 @@ class LTITestCase(TestCase):
 
         When the http referer is missing the request should still be authorized.
         """
-        passport = ConsumerSiteLTIPassportFactory(consumer_site__domain="testserver")
-        lti_parameters = {
-            "resource_link_id": "df7",
-            "context_id": "course-v1:ufr+mathematics+0001",
-            "roles": "Instructor",
-        }
         resource_id = uuid.uuid4()
         url = "http://testserver/lti/videos/{!s}".format(resource_id)
-        client = oauth1.Client(
-            client_key=passport.oauth_consumer_key, client_secret=passport.shared_secret
-        )
-        # Compute Authorization header which looks like:
-        # Authorization: OAuth oauth_nonce="80966668944732164491378916897",
-        # oauth_timestamp="1378916897", oauth_version="1.0", oauth_signature_method="HMAC-SHA1",
-        # oauth_consumer_key="", oauth_signature="frVp4JuvT1mVXlxktiAUjQ7%2F1cw%3D"
-        _uri, headers, _body = client.sign(
-            url,
-            http_method="POST",
-            body=lti_parameters,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        lti_parameters, passport = generate_passport_and_signed_lti_parameters(
+            url=url,
+            lti_parameters={
+                "resource_link_id": "df7",
+                "context_id": "course-v1:ufr+mathematics+0001",
+                "roles": "Instructor",
+            },
         )
 
-        # Parse headers to pass to template as part of context:
-        oauth_dict = dict(
-            param.strip().replace('"', "").split("=")
-            for param in headers["Authorization"].split(",")
-        )
-
-        signature = oauth_dict["oauth_signature"]
-        oauth_dict["oauth_signature"] = unquote(signature)
-        oauth_dict["oauth_nonce"] = oauth_dict.pop("OAuth oauth_nonce")
-
-        lti_parameters.update(oauth_dict)
         request = self.factory.post(url, lti_parameters)
         lti = LTI(request, uuid.uuid4())
         self.assertTrue(lti.verify())
         self.assertEqual(lti.get_consumer_site(), passport.consumer_site)
 
         # If we alter the signature (e.g. add "a" to it), the verification should fail
-        oauth_dict["oauth_signature"] = "{:s}a".format(signature)
-
-        lti_parameters.update(oauth_dict)
+        lti_parameters["oauth_signature"] = "{:s}a".format(
+            lti_parameters["oauth_signature"]
+        )
         request = self.factory.post(url, lti_parameters)
         lti = LTI(request, resource_id)
         with self.assertRaises(LTIException):
@@ -581,3 +537,93 @@ class LTITestCase(TestCase):
         lti = LTI(request, uuid.uuid4())
         self.assertTrue(lti.verify())
         self.assertEqual(lti.get_consumer_site(), passport.consumer_site)
+
+    @mock.patch(
+        "oauthlib.oauth1.rfc5849.generate_nonce",
+        return_value="59474787080480293391616018589",
+    )
+    @mock.patch("oauthlib.oauth1.rfc5849.generate_timestamp", return_value="1616018589")
+    def test_lti_sign_post_request(self, mock_ts, mock_nonce):
+        """Simulate an LTI launch request with oauth in the body.
+
+        This test uses the oauthlib library to simulate an LTI launch request and make sure
+        that our LTI verification works.
+        """
+        ConsumerSiteLTIPassportFactory(
+            consumer_site__domain="localhost:8080",
+            oauth_consumer_key="W1PWSNDUL7T7YGMCOWZH",
+            shared_secret="passport_secret",
+        )
+        lti_parameters = {
+            "content_items": (
+                '{"@context":"http://purl.imsglobal.org/ctx/lti/v1/ContentItem",'
+                '"@graph":[{'
+                '"@type":"LtiLinkItem",'
+                '"url":"/lti/videos/0c02115f-dae7-4c05-b931-2ddc7e87abc1",'
+                '"title":"example.com-df8",'
+                '"frame":[]'
+                "}]"
+                "}"
+            ),
+            "oauth_version": "1.0",
+            "oauth_nonce": "557b295f193999bb0c515e332d77ecb9",
+            "oauth_timestamp": "1616586282",
+            "oauth_consumer_key": "W1PWSNDUL7T7YGMCOWZH",
+            "user_id": "2",
+            "lis_person_sourcedid": "",
+            "roles": (
+                "Instructor,"
+                "urn:lti:sysrole:ims/lis/Administrator,"
+                "urn:lti:instrole:ims/lis/Administrator"
+            ),
+            "context_id": "2",
+            "context_label": "aui",
+            "context_title": "aui",
+            "context_type": "CourseSection",
+            "lis_course_section_sourcedid": "",
+            "launch_presentation_locale": "en",
+            "ext_lms": "moodle-2",
+            "tool_consumer_info_product_family_code": "moodle",
+            "tool_consumer_info_version": "2020110902.01",
+            "oauth_callback": "about:blank",
+            "lti_version": "LTI-1p0",
+            "lti_message_type": "ContentItemSelectionRequest",
+            "tool_consumer_instance_guid": "localhost",
+            "tool_consumer_instance_name": "",
+            "tool_consumer_instance_description": "",
+            "accept_media_types": "application/vnd.ims.lti.v1.ltilink",
+            "accept_presentation_document_targets": "frame,iframe,window",
+            "accept_copy_advice": "false",
+            "accept_multiple": "true",
+            "accept_unsigned": "false",
+            "auto_create": "false",
+            "can_confirm": "false",
+            "lti_select_form_action_url": (
+                "http://localhost:8080/mod/lti/contentitem_return.php"
+                "?course=2&id=1&sesskey=BJ9rCsvIPs"
+            ),
+            "title": "localhost.marsha",
+            "text": "",
+            "oauth_signature_method": "HMAC-SHA1",
+            "oauth_signature": "5jUg6zMZLHOOPN+2FkiqBXz4uSw=",
+        }
+
+        request = self.factory.post(
+            reverse("select_lti_view"),
+            lti_parameters,
+            HTTP_REFERER="http://localhost:8080/mod/lti/contentitem.php",
+        )
+
+        lti = LTI(request)
+
+        sent_lti_parameters = lti_parameters.copy()
+        sent_lti_parameters["oauth_signature"] = "SS11F5F7ubKZuxiJmEOHAJbMaPE="
+        sent_lti_parameters["oauth_timestamp"] = mock_ts.return_value
+        sent_lti_parameters["oauth_nonce"] = mock_nonce.return_value
+
+        self.assertDictEqual(
+            sent_lti_parameters,
+            lti.sign_post_request(
+                lti_parameters.get("lti_select_form_action_url"), lti_parameters
+            ),
+        )

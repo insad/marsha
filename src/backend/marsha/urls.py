@@ -11,13 +11,23 @@ from marsha.core import models
 from marsha.core.admin import admin_site
 from marsha.core.api import (
     DocumentViewSet,
+    OrganizationViewSet,
+    PlaylistViewSet,
     ThumbnailViewSet,
     TimedTextTrackViewSet,
+    UserViewSet,
     VideoViewSet,
     XAPIStatementView,
     update_state,
 )
-from marsha.core.views import DevelopmentLTIView, DocumentLTIView, VideoLTIView
+from marsha.core.views import (
+    DevelopmentLTIView,
+    DocumentView,
+    LTIRespondView,
+    LTISelectView,
+    SiteView,
+    VideoView,
+)
 
 
 router = DefaultRouter()
@@ -29,15 +39,21 @@ router.register(
     basename="timed_text_tracks",
 )
 router.register(models.Thumbnail.RESOURCE_NAME, ThumbnailViewSet, basename="thumbnails")
+router.register("organizations", OrganizationViewSet, basename="organizations")
+router.register("playlists", PlaylistViewSet, basename="playlists")
+router.register("users", UserViewSet, basename="users")
 
 urlpatterns = [
     # Admin
     path(f"{admin_site.name}/", admin_site.urls),
     # LTI
-    path("lti/videos/<uuid:uuid>", VideoLTIView.as_view(), name="video_lti_view"),
-    path(
-        "lti/documents/<uuid:uuid>", DocumentLTIView.as_view(), name="document_lti_view"
-    ),
+    path("lti/select/", LTISelectView.as_view(), name="select_lti_view"),
+    path("lti/respond/", LTIRespondView.as_view(), name="respond_lti_view"),
+    path("lti/videos/<uuid:uuid>", VideoView.as_view(), name="video_lti_view"),
+    path("lti/documents/<uuid:uuid>", DocumentView.as_view(), name="document_lti_view"),
+    # Public resources
+    path("videos/<uuid:uuid>", VideoView.as_view(), name="video_public"),
+    path("documents/<uuid:uuid>", DocumentView.as_view(), name="document_public"),
     # API
     path("api/update-state", update_state, name="update_state"),
     path(
@@ -47,6 +63,7 @@ urlpatterns = [
     ),
     path("api/", include(router.urls)),
     path("xapi/", XAPIStatementView.as_view(), name="xapi"),
+    path("", SiteView.as_view(), name="site"),
 ]
 
 if settings.DEBUG:

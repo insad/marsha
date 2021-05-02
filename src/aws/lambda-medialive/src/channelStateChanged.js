@@ -1,29 +1,25 @@
-const AWS = require('aws-sdk');
 const { computeSignature, sendRequest } = require('update-state/utils');
 const { DISABLE_SSL_VALIDATION, MARSHA_URL, SHARED_SECRET } = process.env;
 
-const mediaLive = new AWS.MediaLive({ apiVersion: '2017-10-14' });
-
-module.exports = async (event, context) => {
+module.exports = async (channel, event, context) => {
   const status = event.detail.state;
 
-  if (!["RUNNING", "STOPPED"].includes(status)) {
-    throw new Error(`Expected status are RUNNING and STOPPED. ${status} received`);
+  const correspondingStatus = {
+    'CREATED': 'idle',
+    'RUNNING': 'running',
+    'STOPPED': 'stopped',
   }
 
-  const arn_regex = /^arn:aws:medialive:.*:.*:channel:(.*)$/
+  if (!correspondingStatus[status]) {
+    throw new Error(
+      `Expected status are CREATED, RUNNING and STOPPED. ${status} received`,
+    );
+  }
 
-  const arn = event.detail.channel_arn;
-  const matches = arn.match(arn_regex);
-  
-  const channel = await mediaLive.describeChannel({
-    ChannelId: matches[1]
-  }).promise();
-
-  const videoId = channel.Name.split("_")[0];
+  const videoId = channel.Name.split('_')[1];
   const body = {
     logGroupName: context.logGroupName,
-    state: status.toLowerCase(),
+    state: correspondingStatus[status],
   };
 
   const signature = computeSignature(SHARED_SECRET, JSON.stringify(body));
@@ -33,7 +29,6 @@ module.exports = async (event, context) => {
     signature,
     DISABLE_SSL_VALIDATION ? false : true,
     `${MARSHA_URL}/api/videos/${videoId}/update-live-state/`,
-    'PATCH'
-  );  
+    'PATCH',
+  );
 };
-

@@ -11,14 +11,15 @@ import {
   RawIntlProvider,
 } from 'react-intl';
 
-import { AppRoutes } from './components/AppRoutes';
 import { appData, getDecodedJwt } from './data/appData';
+import { flags } from './types/AppData';
 import { report } from './utils/errors/report';
+import { isFeatureEnabled } from './utils/isFeatureEnabled';
 // Load our style reboot into the DOM
 import { GlobalStyles } from './utils/theme/baseStyles';
 import { theme } from './utils/theme/theme';
 
-if (appData.sentry_dsn) {
+if (isFeatureEnabled(flags.SENTRY) && appData.sentry_dsn) {
   Sentry.init({
     dsn: appData.sentry_dsn,
     environment: appData.environment,
@@ -87,11 +88,21 @@ document.addEventListener('DOMContentLoaded', async (event) => {
     cache,
   );
 
+  let App: () => JSX.Element;
+  try {
+    const { Routes } = await import(`./components/${appData.frontend}Routes`);
+    App = Routes;
+  } catch (e) {
+    throw new Error(
+      `${appData.frontend} is not an expected value for appData.frontend`,
+    );
+  }
+
   // Render our actual component tree
   ReactDOM.render(
     <RawIntlProvider value={intl}>
-      <Grommet theme={theme}>
-        <AppRoutes />
+      <Grommet theme={theme} style={{ height: '100%' }}>
+        <App />
         <GlobalStyles />
       </Grommet>
     </RawIntlProvider>,

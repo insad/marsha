@@ -5,7 +5,7 @@ from django.db import models
 from django.utils.functional import lazy
 from django.utils.translation import gettext_lazy as _
 
-from ..defaults import LIVE_CHOICES, RUNNING
+from ..defaults import HARVESTED, LIVE_CHOICES, RUNNING
 from ..utils.time_utils import to_timestamp
 from .base import BaseModel
 from .file import AbstractImage, BaseFile, UploadableFileMixin
@@ -44,6 +44,12 @@ class Video(BaseFile):
         choices=LIVE_CHOICES,
         null=True,
         blank=True,
+    )
+
+    is_public = models.BooleanField(
+        default=False,
+        verbose_name=_("is video public"),
+        help_text=_("Is the video publicly accessible?"),
     )
 
     class Meta:
@@ -100,6 +106,11 @@ class Video(BaseFile):
         if "resolutions" in extra_parameters:
             self.resolutions = extra_parameters.get("resolutions")
 
+        if upload_state == HARVESTED:
+            # reset live state and info
+            self.live_state = None
+            self.live_info = None
+
         super().update_upload_state(upload_state, uploaded_on, **extra_parameters)
 
     @property
@@ -109,7 +120,25 @@ class Video(BaseFile):
         The value of this field seems to be trivially derived from the value of the
         `uploaded_on` field but it is necessary for conveniency and clarity in the client.
         """
-        return self.uploaded_on is not None or self.live_state == RUNNING
+        return (
+            self.uploaded_on is not None and self.upload_state != HARVESTED
+        ) or self.live_state == RUNNING
+
+    @staticmethod
+    def get_ready_clause():
+        """Clause used in lti.utils.get_or_create_resource to filter the videos.
+
+        Only show videos that have successfully gone through the upload process,
+        or live streams that are in the running state.
+
+        Returns
+        -------
+        models.Q
+            A condition added to a QuerySet
+        """
+        return models.Q(uploaded_on__isnull=False, live_state__isnull=True) | models.Q(
+            live_state="running"
+        )
 
 
 class BaseTrack(UploadableFileMixin, BaseModel):
@@ -181,6 +210,15 @@ class TimedTextTrack(BaseTrack):
         default=SUBTITLE,
     )
 
+    extension = models.CharField(
+        blank=True,
+        default=None,
+        help_text=_("timed text track extension"),
+        max_length=10,
+        null=True,
+        verbose_name=_("extension"),
+    )
+
     class Meta:
         """Options for the ``TimedTextTrack`` model."""
 
@@ -225,6 +263,25 @@ class TimedTextTrack(BaseTrack):
             language=self.language,
             mode="_{:s}".format(self.mode) if self.mode else "",
         )
+
+    def update_upload_state(self, upload_state, uploaded_on, **extra_parameters):
+        """Manage upload state.
+
+        Parameters
+        ----------
+        upload_state: Type[string]
+            state of the upload in AWS.
+
+        uploaded_on: Type[DateTime]
+            datetime at which the active version of the file was uploaded.
+
+        extra_paramters: Type[Dict]
+            Dictionnary containing arbitrary data sent from AWS lambda.
+        """
+        if "extension" in extra_parameters:
+            self.extension = extra_parameters["extension"]
+
+        super().update_upload_state(upload_state, uploaded_on, **extra_parameters)
 
 
 class SignTrack(BaseTrack):

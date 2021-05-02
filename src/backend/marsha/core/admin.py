@@ -6,6 +6,8 @@ from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
+from waffle import admin as waffle_admin
+
 from marsha.core.models import (
     AudioTrack,
     ConsumerSite,
@@ -159,6 +161,10 @@ class MarshaAdminSite(admin.AdminSite):
 
 admin_site = MarshaAdminSite(name="admin")
 
+admin_site.register(waffle_admin.Flag, waffle_admin.FlagAdmin)
+admin_site.register(waffle_admin.Sample, waffle_admin.SampleAdmin)
+admin_site.register(waffle_admin.Switch, waffle_admin.SwitchAdmin)
+
 
 class UserOrganizationsInline(admin.TabularInline):
     """Inline to display organizations to which a user has been granted access."""
@@ -275,6 +281,8 @@ class SignTrackInline(admin.TabularInline):
 class VideoAdmin(BaseFileAdmin):
     """Admin class for the Video model."""
 
+    fields = BaseFileAdmin.fields + ("is_public",)
+    list_display = BaseFileAdmin.list_display + ("is_public",)
     inlines = [AudioTrackInline, TimedTextTrackInline, SignTrackInline]
     verbose_name = _("Video")
 
@@ -308,6 +316,8 @@ class PlaylistPortabilityInline(admin.TabularInline):
 class DocumentAdmin(BaseFileAdmin):
     """Admin class for the Document model."""
 
+    fields = BaseFileAdmin.fields + ("is_public",)
+    list_display = BaseFileAdmin.list_display + ("is_public",)
     verbose_name = _("Document")
 
 

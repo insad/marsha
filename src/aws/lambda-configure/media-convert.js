@@ -4,27 +4,27 @@ const fs = require('fs');
 const AWS = require('aws-sdk');
 
 const presets = [
-  './presets/cmaf_audio_aac_64kbps.json',
-  './presets/cmaf_audio_aac_96kbps.json',
-  './presets/cmaf_audio_aac_128kbps.json',
-  './presets/cmaf_audio_aac_160kbps.json',
-  './presets/cmaf_audio_aac_192kbps.json',
-  './presets/cmaf_video_h264_144p_30fps_300kbps.json',
-  './presets/cmaf_video_h264_240p_30fps_600kbps.json',
-  './presets/cmaf_video_h264_480p_30fps_1200kbps.json',
-  './presets/cmaf_video_h264_720p_30fps_2400kbps.json',
-  './presets/cmaf_video_h264_1080p_30fps_5400kbps.json',
-  './presets/thumbnail_jpeg_144p.json',
-  './presets/thumbnail_jpeg_240p.json',
-  './presets/thumbnail_jpeg_480p.json',
-  './presets/thumbnail_jpeg_720p.json',
-  './presets/thumbnail_jpeg_1080p.json',
-  './presets/preview_jpeg_100p.json',
-  './presets/video_mp4_h264_144p_30fps_300kbps.json',
-  './presets/video_mp4_h264_240p_30fps_600kbps.json',
-  './presets/video_mp4_h264_480p_30fps_1200kbps.json',
-  './presets/video_mp4_h264_720p_30fps_2400kbps.json',
-  './presets/video_mp4_h264_1080p_30fps_5400kbps.json',
+  `${__dirname}/presets/cmaf_audio_aac_64kbps.json`,
+  `${__dirname}/presets/cmaf_audio_aac_96kbps.json`,
+  `${__dirname}/presets/cmaf_audio_aac_128kbps.json`,
+  `${__dirname}/presets/cmaf_audio_aac_160kbps.json`,
+  `${__dirname}/presets/cmaf_audio_aac_192kbps.json`,
+  `${__dirname}/presets/cmaf_video_h264_144p_30fps_300kbps.json`,
+  `${__dirname}/presets/cmaf_video_h264_240p_30fps_600kbps.json`,
+  `${__dirname}/presets/cmaf_video_h264_480p_30fps_1200kbps.json`,
+  `${__dirname}/presets/cmaf_video_h264_720p_30fps_2400kbps.json`,
+  `${__dirname}/presets/cmaf_video_h264_1080p_30fps_5400kbps.json`,
+  `${__dirname}/presets/thumbnail_jpeg_144p.json`,
+  `${__dirname}/presets/thumbnail_jpeg_240p.json`,
+  `${__dirname}/presets/thumbnail_jpeg_480p.json`,
+  `${__dirname}/presets/thumbnail_jpeg_720p.json`,
+  `${__dirname}/presets/thumbnail_jpeg_1080p.json`,
+  `${__dirname}/presets/preview_jpeg_100p.json`,
+  `${__dirname}/presets/video_mp4_h264_144p_30fps_300kbps.json`,
+  `${__dirname}/presets/video_mp4_h264_240p_30fps_600kbps.json`,
+  `${__dirname}/presets/video_mp4_h264_480p_30fps_1200kbps.json`,
+  `${__dirname}/presets/video_mp4_h264_720p_30fps_2400kbps.json`,
+  `${__dirname}/presets/video_mp4_h264_1080p_30fps_5400kbps.json`,
 ];
 
 // Return MediaConvert regional account Endpoint
@@ -50,7 +50,7 @@ let createPreset = (preset, url) => {
     // Supplement the preset name with the environment
     params.Name = process.env.ENV_TYPE + '_' + params.Name;
 
-    mediaconvert.getPreset({ Name: params.Name }, function(error, data) {
+    mediaconvert.getPreset({ Name: params.Name }, function (error, data) {
       if (error) {
         // the preset does not exist, let's create it
         mediaconvert.createPreset(params, (error, data) => {
@@ -74,7 +74,7 @@ let createPreset = (preset, url) => {
   });
 };
 
-let createPresets = event => {
+let createPresets = (event) => {
   if (!process.env.ENV_TYPE) {
     const message = 'You must set the ENV_TYPE environment variable.';
     console.log(message);
@@ -85,9 +85,9 @@ let createPresets = event => {
     let promises = [];
     let url = event.EndPoint;
 
-    presets.forEach(preset => promises.push(createPreset(preset, url)));
+    presets.forEach((preset) => promises.push(createPreset(preset, url)));
     Promise.all(promises)
-      .then(data => {
+      .then((data) => {
         // Return a list of the names of the presets that we created
         resolve({
           Presets: data.reduce((list, item) => {
@@ -96,7 +96,7 @@ let createPresets = event => {
           }, []),
         });
       })
-      .catch(error => reject(error));
+      .catch((error) => reject(error));
   });
 };
 

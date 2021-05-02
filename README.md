@@ -82,10 +82,10 @@ Make sure you have a recent version of Docker and
 
 ```bash
 $ docker -v
-  Docker version 18.09.0, build 4d60db4
+  Docker version 19.03.6, build 369ce74a3c
 
 $ docker-compose --version
-  docker-compose version 1.23.2, build 1110ad01
+  docker-compose version 1.24.1, build 4667896b
 ```
 
 ⚠️ You may need to run the following commands with `sudo` but this can be avoided by assigning your user to the `docker` group.
@@ -94,27 +94,68 @@ $ docker-compose --version
 
 All tasks related to this environment are run from the `./src/aws` directory. We use `Terraform` to keep this infrastructure configuration as code and easily manage several independent deployments of the whole `AWS` infrastructure.
 
-🔧 **Before you go further**, you need to create `./src/aws/env.d/development` and replace the relevant values with your own. You can take a look at the [environment documentation](https://github.com/openfun/marsha/blob/master/docs/env.md#2-environment-to-deploy-marsha-to-aws) for more details on this topic. You can use this command to create the file from the existing model:
+> Note for Mac users: Marsha's AWS development setup uses `getopt`. The version that comes with macOS is not suitable for our use case. You need to install the GNU version and add it to your path so it is used by default.
+>
+> `brew install gnu-getopt`
+>
+> `echo 'export PATH="/usr/local/opt/gnu-getopt/bin:$PATH"' >> ~/.zshrc`
+
+There are 2 Terraform projects in Marsha with two different purposes:
+
+- `./src/aws/shared_resources`: this project manages resources common to all marsha environments on the same AWS account. These resources must not live in different workspaces so you must work in the `default` workspace. To ease the use of this project, a dedicated script is available in `./src/aws/bin/shared-resources` which uses and configures the `Terraform` docker image. You have to run a Terraform command as if you were using the terraform cli. (eg: `./bin/shared-resources plan` will execute Terraform's "plan" command).
+- `./src/aws`: this is the main project we use, most of the infrastructure is managed here (in all `*.tf` files). This project must use [`Terraform` workspaces](https://www.terraform.io/docs/state/workspaces.html) and we highly recommand you to not use the default one. With multiple workspaces, you can manage multiple environments for your Marsha instance with a single AWS account. To ease the use of this project, a dedicated script is available in `./src/aws/bin/terraform` which uses and configures the `Terraform` docker image. You have to run a Terraform command as if you were using the terraform cli. (eg: `./bin/terraform plan` will execute Terraform's "plan" command).
+
+#### Terraform state management
+
+Terraform manages a [state](https://www.terraform.io/docs/state/index.html) of your infrastructure. By default this state is stored locally on your machine but it is highly recommanded to use a [remote backend](https://www.terraform.io/docs/state/remote.html).
+
+You will find all you need to configure a remote backend in the Terraform documentation: https://www.terraform.io/docs/configuration/blocks/backends/index.html
+
+⚠ You must configure your state management before running any of the commands hereafter. The first `init` will initiate your state and after that you will have to deal with state migration if you want to modify it. You can create a file `src/aws/state.tf` and `src/aws/shared-resources/state.tf` to configure a backend, there is an example in each project (`state.tf.dist` file).
+
+🔧 **Before you go further**, you need to create `./src/aws/env.d/development` and replace the relevant values with your own. You can take a look at the [environment documentation](https://github.com/openfun/marsha/blob/master/docs/env.md#2-environment-to-deploy-marsha-to-aws) for more details on this topic. You should use this command to create the file from the existing model:
 
     $ cp ./src/aws/env.d/development.dist ./src/aws/env.d/development
 
-Create the shared state bucket where `Terraform` will keep all the information on your deployments so different developers/machines/CI processes can interact with them:
-
-    $ make state-create
-
 Initialize your `Terraform` config:
 
+    $ cd src/aws
     $ make init
 
-Build the lambdas (using `yarn`) and automatically configure the infrastructure (this will start incurring billing on `AWS`):
+The `make init` command will also create an [ECR](https://aws.amazon.com/ecr/) repository. Before going further you have to build and publish the lambda docker image. Unfortunately AWS doesn't allow to use a public image, so you have to host this one on a private ECR instance. Copy the output of the `init` command, you will use them in the next step.
 
-    $ make deploy
+#### Build and publish the lambda image
+
+For this step, we cooked a script to help you build, tag and deploy images. All the scripts are run from the marsha root directory.
+
+🔧 **Before you go further**, you need to create `./env.d/lambda` and replace the relevant values with your own. The `ECR` url is available in the `shared_resources` terraform output you copied earlier. You should use this command to create the file from the existing model:
+
+    $ cp ./env.d/lambda.dist ./env.d/lambda
+
+You have to successively run these commands : 
+
+Build the image:
+
+    $ ./bin/lambda build
+
+Tag the image:
+
+    $ ./bin/lambda tag
+
+And then publish it:
+
+    $ ./bin/lambda publish
+
+#### Apply all terraform plans
+
+Terraform is split in two parts. The main one, directly in `src/aws` can work on multiple [`Terraform` workspaces](https://www.terraform.io/docs/state/workspaces.html). You will use this feature if you want separate environments (development, staging, preprod and production). We also need some resources available across all workspaces. For this we have an other terraform in `src/aws/shared_resources`.
+To apply all plans at once run this command in the `src/aws` directory.
+
+    $ make apply-all
 
 Everything should be set up! You can check on your `AWS` management console.
 
 You may have noticed that the `AWS` development environment requires a URL where the `Django` backend is running. You can easily get a URL that points to your locally running `Django` app using a tool such as [`ngrok`](https://ngrok.com).
-
-If you run several environments of Marsha, we suggest you take a look at [`Terraform` workspaces](https://www.terraform.io/docs/state/workspaces.html).
 
 ### The `Django` Backend
 

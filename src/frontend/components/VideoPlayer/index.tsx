@@ -16,10 +16,10 @@ import {
   videoSize,
 } from '../../types/tracks';
 import { VideoPlayerInterface } from '../../types/VideoPlayer';
-import { isHlsSupported } from '../../utils/isAbrSupported';
 import { Maybe, Nullable } from '../../utils/types';
+import { Chat } from '../Chat';
 import { DownloadVideo } from '../DownloadVideo';
-import { ERROR_COMPONENT_ROUTE } from '../ErrorComponent/route';
+import { FULL_SCREEN_ERROR_ROUTE } from '../ErrorComponents/route';
 import { Transcripts } from '../Transcripts';
 import './VideoPlayer.css'; // Improve some plyr styles
 
@@ -30,9 +30,13 @@ const trackTextKind: { [key in timedTextMode]?: string } = {
 
 interface BaseVideoPlayerProps {
   video: Nullable<Video>;
+  playerType: string;
 }
 
-const VideoPlayer = ({ video: baseVideo }: BaseVideoPlayerProps) => {
+const VideoPlayer = ({
+  video: baseVideo,
+  playerType,
+}: BaseVideoPlayerProps) => {
   const [player, setPlayer] = useState(
     undefined as Maybe<VideoPlayerInterface>,
   );
@@ -74,7 +78,7 @@ const VideoPlayer = ({ video: baseVideo }: BaseVideoPlayerProps) => {
       // Instantiate Plyr and keep the instance in state
       setPlayer(
         createPlayer(
-          'plyr',
+          playerType,
           videoNodeRef.current!,
           setPlayerCurrentTime,
           video,
@@ -96,7 +100,7 @@ const VideoPlayer = ({ video: baseVideo }: BaseVideoPlayerProps) => {
 
   // The video is somehow missing and jwt must be set
   if (!video) {
-    return <Redirect push to={ERROR_COMPONENT_ROUTE('notFound')} />;
+    return <Redirect push to={FULL_SCREEN_ERROR_ROUTE('notFound')} />;
   }
 
   const transcripts = timedTextTracks
@@ -109,10 +113,13 @@ const VideoPlayer = ({ video: baseVideo }: BaseVideoPlayerProps) => {
 
   const thumbnailUrls =
     (thumbnail && thumbnail.is_ready_to_show && thumbnail.urls) ||
-    video.urls.thumbnails;
-  const resolutions = Object.keys(video.urls.mp4).map(
+    video.urls!.thumbnails;
+  const resolutions = Object.keys(video.urls!.mp4).map(
     (size) => Number(size) as videoSize,
   );
+
+  // order resolutions from the higher to the lower
+  resolutions.sort((a, b) => b - a);
 
   return (
     <Box>
@@ -121,53 +128,40 @@ const VideoPlayer = ({ video: baseVideo }: BaseVideoPlayerProps) => {
       <video
         ref={videoNodeRef}
         crossOrigin="anonymous"
-        poster={thumbnailUrls[resolutions[resolutions.length - 1]]}
+        poster={thumbnailUrls[resolutions[0]]}
         tabIndex={-1}
       >
-        {!!videoNodeRef.current && isHlsSupported(videoNodeRef.current) && (
+        {resolutions.map((size) => (
           <source
-            src={video.urls.manifests.hls}
-            size="auto"
-            type="application/vnd.apple.mpegURL"
+            key={video.urls!.mp4[size]}
+            size={`${size}`}
+            src={video.urls!.mp4[size]}
+            type="video/mp4"
           />
-        )}
-        {!!videoNodeRef.current &&
-          !isHlsSupported(videoNodeRef.current) &&
-          resolutions.map((size) => (
-            <source
-              key={video.urls.mp4[size]}
-              size={`${size}`}
-              src={video.urls.mp4[size]}
-              type="video/mp4"
+        ))}
+
+        {timedTextTracks
+          .filter((track) => track.is_ready_to_show)
+          .filter((track) =>
+            [timedTextMode.CLOSED_CAPTIONING, timedTextMode.SUBTITLE].includes(
+              track.mode,
+            ),
+          )
+          .map((track) => (
+            <track
+              key={track.id}
+              src={track.url}
+              srcLang={track.language}
+              kind={trackTextKind[track.mode]}
+              label={languages[track.language] || track.language}
             />
           ))}
-
-        {/* This is a workaround to force plyr to load its tracks list once
-          instantiated. Without this, captions are not loaded correctly, at least, on firefox.
-          */}
-        {player &&
-          timedTextTracks
-            .filter((track) => track.is_ready_to_show)
-            .filter((track) =>
-              [
-                timedTextMode.CLOSED_CAPTIONING,
-                timedTextMode.SUBTITLE,
-              ].includes(track.mode),
-            )
-            .map((track) => (
-              <track
-                key={track.id}
-                src={track.url}
-                srcLang={track.language}
-                kind={trackTextKind[track.mode]}
-                label={languages[track.language] || track.language}
-              />
-            ))}
       </video>
-      {video.show_download && <DownloadVideo video={video} />}
+      {video.show_download && <DownloadVideo urls={video.urls!} />}
       {transcripts.length > 0 && (
         <Transcripts transcripts={transcripts as TimedTextTranscript[]} />
       )}
+      {video.live_state !== null && video.xmpp && <Chat xmpp={video.xmpp} />}
     </Box>
   );
 };

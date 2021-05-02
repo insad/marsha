@@ -291,6 +291,89 @@ that will be used to distribute processed files to end users.
 - Required: Yes
 - Default: None
 
+### XMPP settings
+
+#### DJANGO_LIVE_CHAT_ENABLED
+
+To enable or disable the global chat feature.
+
+- Type: boolean
+- Required: No
+- Default: False
+
+#### DJANGO_XMPP_DOMAIN
+
+Main XMPP server domain.
+
+- Type: string
+- Required: Only when `DJANGO_LIVE_CHAT_ENABLED` is set to True
+- Default: None
+
+#### DJANGO_XMPP_BOSH_URL
+
+The Bosh endpoint defined by your XMPP server. This url is used by Marsha's front application to excahnge with the XMPP server.
+Required when `DJANGO_LIVE_CHAT_ENABLED` is set to True
+
+- Type: string
+- Required: Only when `DJANGO_LIVE_CHAT_ENABLED` is set to True
+- Default: None
+
+#### DJANGO_XMPP_CONFERENCE_DOMAIN
+
+Your XMPP MUC component domain.
+
+- Type: string
+- Required: Only when `DJANGO_LIVE_CHAT_ENABLED` is set to True
+- Default: None
+
+#### DJANGO_XMPP_PRIVATE_ADMIN_JID
+
+The JID of an admin configured on your XMPP server. Example: `admin@your-xmpp-server.com`
+
+- Type: string
+- Required: Only when `DJANGO_LIVE_CHAT_ENABLED` is set to True
+- Default: None
+
+#### DJANGO_XMPP_PRIVATE_SERVER_PORT
+
+XMPP server port to use for client connections
+
+- Type: number
+- Required: No
+- Default: 5222
+
+#### DJANGO_XMPP_PRIVATE_SERVER_PASSWORD
+
+The password associated to your admin user set in the setting `DJANGO_XMPP_PRIVATE_ADMIN_JID`
+
+- Type: string
+- Required: Only when `DJANGO_LIVE_CHAT_ENABLED` is set to True
+- Default: None
+
+#### DJANGO_XMPP_JWT_SHARED_SECRET
+
+Secret key used to sign JWTs.
+
+- Type: string
+- Required: Only when `DJANGO_LIVE_CHAT_ENABLED` is set to True
+- Default: None
+
+#### DJANGO_XMPP_JWT_ISSUER
+
+The JWT issuer accepted by the XMPP server
+
+- Type: string
+- Required: No
+- Default: marsha
+
+#### DJANGO_XMPP_JWT_AUDIENCE
+
+The JWT audience accepted by the XMPP server
+
+- Type: string
+- Required: No
+- Default: marsha
+
 ### Crowdin API access related settings
 
 #### CROWDIN_API_KEY
@@ -332,14 +415,21 @@ A key ID + secret pair for an AWS IAM account with administrative access to the 
 - Required: Yes
 - Default: None
 
-#### TF_VAR_aws_region
+#### AWS_DEFAULT_REGION
 
-The Amazon Web Services region where we deployed or want to deploy our serverless stack.
+The default region used by the AWS provider. All resources managed by terraform will be created on this region.
 
 - Type: string
-- Required: No
-- Default: `"eu-west-1"`
-- Choices: Any valid AWS region name.
+- Required: Yes
+- Default: eu-west-1
+
+#### TF_VAR_s3_bucket_unique_suffix
+
+A unique suffix added to all S3 bucket names. You choose this suffix once and can't change it afterwards as it is not allowed to rename a bucket (terraform would delete the current bucket and create a new one. All your data would be lost for ever). This suffix is needed because a bucket name is unique accross all existing AWS accounts: https://docs.aws.amazon.com/AmazonS3/latest/dev/BucketRestrictions.html
+A suffix can be your company name or any random string. If you don't add this variable, you will not be able to create any s3 bucket in your project.
+
+- Type: string
+- Required: Yes
 
 #### TF_VAR_cloudfront_trusted_signer_id
 
@@ -359,11 +449,21 @@ Note: should be included in the list of values declared in `DJANGO_UPDATE_STATE_
 - Required: Yes
 - Default: None
 
+#### TF_VAR_marsha_base_url
+
+The marsha backend url. This url will be used in the lambda as base url to build all the url called from all lambdas.
+
+Example: `marsha.education`
+
+- Type: string
+- Required: Yes
+- Default: None
+
 #### TF_VAR_update_state_endpoint
 
-URL of the endpoint in Marsha to which our lambdas should POST state updates when they process files.
+The endpoint in Marsha to which our lambdas should POST state updates when they process files.
 
-Example: `https://example.com/api/update-state`.
+Example: `/api/update-state`.
 
 - Type: string
 - Required: Yes
@@ -379,9 +479,45 @@ Whether SSL certificate validation in requests made by the AWS lambdas should be
 
 #### TF_VAR_migrations
 
-A comma separated list of migrations to execute by the migration lambda without the extension (`.js`). List of migrations are available in `src/aws/lambda-migrate/src/migrations`.
+A list of migrations to execute by the migration lambda without the extension (`.js`). List of migrations are available in `src/aws/lambda-migrate/src/migrations`.
 To execute the migration `0001_encode_timed_text_tracks.js` set this variable with `0001_encode_timed_text_tracks`
 
-- Type: string
+Example: ["0001_encode_timed_text_tracks"]
+
+- Type: list of strings
 - Required: No
+- Default: []
+
+#### TF_VAR_lambda_image_name
+
+The [ECR](https://aws.amazon.com/ecr/) image name you want to use. All lambdas are built in one docker image and hosted in this repository
+
+- Type: string
+- Required: Yes
 - Default: None
+
+#### TF_VAR_lambda_image_tag
+
+The lambda docker image tag used by all the lambdas
+
+- Type: string
+- Required: Yes
+- Default: None
+
+#### TF_VAR_ecr_lambda_marsha_arn
+
+The [arn](https://docs.aws.amazon.com/general/latest/gr/aws-arns-and-namespaces.html) associated with the ECR image name.
+This value can be found in the shared_resources terraform output.
+
+- Type: string
+- Required: Yes
+- Default: None
+
+#### TF_VAR_medialive_lambda_name
+
+This variable is used by the medialive routing lambda. This lambda will use the variable to determine on which lambda
+the event should be routed. 
+
+- Type: string
+- Required: Yes
+- Default: marsha-medialive

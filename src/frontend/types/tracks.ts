@@ -21,18 +21,22 @@ export interface Resource {
  * track representations and whenever we might need to pass such state information around.
  */
 export enum uploadState {
+  DELETED = 'deleted',
   ERROR = 'error',
+  HARVESTED = 'harvested',
+  HARVESTING = 'harvesting',
   PENDING = 'pending',
   PROCESSING = 'processing',
   READY = 'ready',
-  UPLOADING = 'uploading',
 }
 
 export enum liveState {
+  CREATING = 'creating',
   IDLE = 'idle',
   STARTING = 'starting',
   RUNNING = 'running',
   STOPPED = 'stopped',
+  STOPPING = 'stopping',
 }
 
 /** Possible modes for a timed text track.
@@ -52,6 +56,14 @@ export interface Playlist {
   lti_id: string;
 }
 
+/* XMPP representation */
+export interface XMPP {
+  bosh_url: string;
+  conference_url: string;
+  prebind_url: string;
+  jid: string;
+}
+
 /** A timed text track record as it exists on the backend. */
 export interface TimedText extends Resource {
   active_stamp: Nullable<number>;
@@ -59,6 +71,7 @@ export interface TimedText extends Resource {
   language: string;
   mode: timedTextMode;
   upload_state: uploadState;
+  source_url: Nullable<string>;
   url: string;
   video: Video['id'];
   title: string;
@@ -83,6 +96,14 @@ export interface Thumbnail extends Resource {
   video: Video['id'];
 }
 
+export interface VideoUrls {
+  manifests: {
+    hls: string;
+  };
+  mp4: Partial<urls>;
+  thumbnails: Partial<urls>;
+}
+
 /** A Video record as it exists on the backend. */
 export interface Video extends Resource {
   description: string;
@@ -92,14 +113,8 @@ export interface Video extends Resource {
   timed_text_tracks: TimedText[];
   title: string;
   upload_state: uploadState;
-  urls: {
-    manifests: {
-      dash: string;
-      hls: string;
-    };
-    mp4: Partial<urls>;
-    thumbnails: Partial<urls>;
-  };
+  urls: Nullable<VideoUrls>;
+  lti_url?: Nullable<string>;
   should_use_subtitle_as_transcript: boolean;
   has_transcript: boolean;
   playlist: Playlist;
@@ -111,6 +126,7 @@ export interface Video extends Resource {
       };
     };
   };
+  xmpp: Nullable<XMPP>;
 }
 
 export type UploadableObject = TimedText | Video | Thumbnail | Document;

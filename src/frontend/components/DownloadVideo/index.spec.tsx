@@ -16,7 +16,6 @@ describe('<DownloadVideo />', () => {
       upload_state: uploadState.READY,
       urls: {
         manifests: {
-          dash: 'https://example.com/dash.mpd',
           hls: 'https://example.com/hls.m3u8',
         },
         mp4: {
@@ -31,7 +30,7 @@ describe('<DownloadVideo />', () => {
     });
 
     const { getByText } = render(
-      wrapInIntlProvider(<DownloadVideo video={video} />),
+      wrapInIntlProvider(<DownloadVideo urls={video.urls!} />),
     );
 
     getByText('1080p');
@@ -48,7 +47,6 @@ describe('<DownloadVideo />', () => {
       upload_state: uploadState.READY,
       urls: {
         manifests: {
-          dash: 'https://example.com/dash.mpd',
           hls: 'https://example.com/hls.m3u8',
         },
         mp4: {
@@ -62,7 +60,7 @@ describe('<DownloadVideo />', () => {
     });
 
     const { getByText, queryByText } = render(
-      wrapInIntlProvider(<DownloadVideo video={video} />),
+      wrapInIntlProvider(<DownloadVideo urls={video.urls!} />),
     );
 
     expect(queryByText(/1080p/i)).toEqual(null);
@@ -78,7 +76,6 @@ describe('<DownloadVideo />', () => {
       upload_state: uploadState.READY,
       urls: {
         manifests: {
-          dash: 'https://example.com/dash.mpd',
           hls: 'https://example.com/hls.m3u8',
         },
         mp4: {
@@ -92,7 +89,7 @@ describe('<DownloadVideo />', () => {
     });
 
     const { container } = render(
-      wrapInIntlProvider(<DownloadVideo video={video} />),
+      wrapInIntlProvider(<DownloadVideo urls={video.urls!} />),
     );
     expect(container.firstChild).toBeNull();
   });

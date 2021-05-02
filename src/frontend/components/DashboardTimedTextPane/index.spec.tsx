@@ -12,7 +12,7 @@ import { report } from '../../utils/errors/report';
 import { videoMockFactory } from '../../utils/tests/factories';
 import { wrapInIntlProvider } from '../../utils/tests/intl';
 import { wrapInRouter } from '../../utils/tests/router';
-import { ERROR_COMPONENT_ROUTE } from '../ErrorComponent/route';
+import { FULL_SCREEN_ERROR_ROUTE } from '../ErrorComponents/route';
 
 jest.mock('../../data/appData', () => ({
   appData: {
@@ -60,7 +60,8 @@ describe('<DashboardTimedTextPane />', () => {
         language: 'en',
         mode: timedTextMode.SUBTITLE,
         upload_state: uploadState.READY,
-        url: 'https://example.com/ttt/142',
+        source_url: 'https://example.com/ttt/142',
+        url: 'https://example.com/ttt/142.vtt',
         video: '43',
         title: 'foo',
       },
@@ -69,28 +70,35 @@ describe('<DashboardTimedTextPane />', () => {
   });
 
   it('gets the list of timedtexttracks and displays them by mode', async () => {
-    fetchMock.get('/api/timedtexttracks/?limit=20&offset=0', [
-      {
-        active_stamp: 2094219242,
-        id: '142',
-        is_ready_to_show: true,
-        language: 'en',
-        mode: timedTextMode.SUBTITLE,
-        upload_state: uploadState.READY,
-        url: 'https://example.com/ttt/142',
-        video: '43',
-      },
-      {
-        active_stamp: 2094219242,
-        id: '144',
-        is_ready_to_show: true,
-        language: 'fr',
-        mode: timedTextMode.CLOSED_CAPTIONING,
-        upload_state: uploadState.READY,
-        url: 'https://example.com/ttt/144',
-        video: '43',
-      },
-    ]);
+    fetchMock.get('/api/timedtexttracks/?limit=20&offset=0', {
+      count: 2,
+      next: null,
+      previous: null,
+      results: [
+        {
+          active_stamp: 2094219242,
+          id: '142',
+          is_ready_to_show: true,
+          language: 'en',
+          mode: timedTextMode.SUBTITLE,
+          upload_state: uploadState.READY,
+          source_url: 'https://example.com/ttt/142',
+          url: 'https://example.com/ttt/142.vtt',
+          video: '43',
+        },
+        {
+          active_stamp: 2094219242,
+          id: '144',
+          is_ready_to_show: true,
+          language: 'fr',
+          mode: timedTextMode.CLOSED_CAPTIONING,
+          upload_state: uploadState.READY,
+          source_url: 'https://example.com/ttt/144',
+          url: 'https://example.com/ttt/144.vtt',
+          video: '43',
+        },
+      ],
+    });
 
     render(wrapInIntlProvider(wrapInRouter(<DashboardTimedTextPane />)));
 
@@ -110,7 +118,7 @@ describe('<DashboardTimedTextPane />', () => {
       wrapInIntlProvider(
         wrapInRouter(<DashboardTimedTextPane />, [
           {
-            path: ERROR_COMPONENT_ROUTE(),
+            path: FULL_SCREEN_ERROR_ROUTE(),
             render: ({ match }) => (
               <span>{`Error Component: ${match.params.code}`}</span>
             ),
