@@ -1,17 +1,21 @@
+import { pollForLive } from '../data/sideEffects/pollForLive';
 import { VideoPlayerCreator } from '../types/VideoPlayer';
-import { createPlyrPlayer } from './createPlyrPlayer';
 import { createVideojsPlayer } from './createVideojsPlayer';
 import { report } from '../utils/errors/report';
 
-export const createPlayer: VideoPlayerCreator = (
+export const createPlayer: VideoPlayerCreator = async (
   type,
   ref,
   dispatchPlayerTimeUpdate,
   video,
 ) => {
+  if (video.live_state) {
+    ref.classList.add('offscreen');
+    await pollForLive(video.urls!);
+    ref.classList.remove('offscreen');
+  }
+
   switch (type) {
-    case 'plyr':
-      return createPlyrPlayer(ref, dispatchPlayerTimeUpdate, video.urls!);
     case 'videojs':
       const player = createVideojsPlayer(
         ref,

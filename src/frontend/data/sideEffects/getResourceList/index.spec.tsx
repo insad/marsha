@@ -5,7 +5,6 @@ import { modelName } from '../../../types/models';
 import { uploadState, Video } from '../../../types/tracks';
 import { report } from '../../../utils/errors/report';
 import { videoMockFactory } from '../../../utils/tests/factories';
-import { jestMockOf } from '../../../utils/types';
 import { addMultipleResources } from '../../stores/generics';
 import { getResourceList } from './';
 
@@ -23,19 +22,17 @@ jest.mock('../../../utils/errors/report', () => ({
   report: jest.fn(),
 }));
 
-const mockAddMultipleResources = addMultipleResources as jestMockOf<
+const mockAddMultipleResources = addMultipleResources as jest.MockedFunction<
   typeof addMultipleResources
 >;
 
 describe('sideEffects/getResourceList', () => {
-  const video42 = videoMockFactory({
-    id: '42',
+  const videoPending = videoMockFactory({
     is_ready_to_show: false,
     upload_state: uploadState.PENDING,
   });
 
-  const video43 = videoMockFactory({
-    id: '43',
+  const videoReady = videoMockFactory({
     is_ready_to_show: true,
     upload_state: uploadState.READY,
   });
@@ -50,7 +47,7 @@ describe('sideEffects/getResourceList', () => {
         count: 2,
         next: null,
         previous: null,
-        results: [video42, video43],
+        results: [videoPending, videoReady],
       }),
     );
 
@@ -61,16 +58,8 @@ describe('sideEffects/getResourceList', () => {
 
     expect(status).toEqual(requestStatus.SUCCESS);
     expect(mockAddMultipleResources).toHaveBeenCalledWith(modelName.VIDEOS, [
-      videoMockFactory({
-        id: '42',
-        is_ready_to_show: false,
-        upload_state: uploadState.PENDING,
-      }),
-      videoMockFactory({
-        id: '43',
-        is_ready_to_show: true,
-        upload_state: uploadState.READY,
-      }),
+      videoPending,
+      videoReady,
     ]);
   });
 

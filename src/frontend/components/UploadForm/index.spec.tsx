@@ -9,7 +9,6 @@ import { timedTextMode, uploadState } from '../../types/tracks';
 import { videoMockFactory } from '../../utils/tests/factories';
 import { wrapInIntlProvider } from '../../utils/tests/intl';
 import { wrapInRouter } from '../../utils/tests/router';
-import { jestMockOf } from '../../utils/types';
 import { DASHBOARD_ROUTE } from '../Dashboard/route';
 import { FULL_SCREEN_ERROR_ROUTE } from '../ErrorComponents/route';
 import { UploadManager } from '../UploadManager';
@@ -26,12 +25,12 @@ jest.mock('../../data/sideEffects/uploadFile', () => ({
   uploadFile: jest.fn(),
 }));
 jest.mock('../../data/stores/generics', () => ({
-  addResource: jest.fn(),
   getResource: jest.fn(),
 }));
 
-const mockUploadFile: jestMockOf<typeof uploadFile> = uploadFile as any;
-const mockGetResource = getResource as jestMockOf<typeof getResource>;
+const mockUploadFile: jest.MockedFunction<typeof uploadFile> =
+  uploadFile as any;
+const mockGetResource = getResource as jest.MockedFunction<typeof getResource>;
 
 describe('UploadForm', () => {
   const object = videoMockFactory({

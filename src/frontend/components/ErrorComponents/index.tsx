@@ -15,7 +15,8 @@ export interface ErrorComponentsProps {
     | 'upload'
     | 'liveIncompatible'
     | 'liveInit'
-    | 'liveToVod';
+    | 'liveToVod'
+    | 'liveStopped';
 }
 
 const FullScreenErrorStyled = styled(LayoutMainArea)`
@@ -38,8 +39,7 @@ const ErrorContent = styled.div`
 const messages = {
   generic: defineMessages({
     text: {
-      defaultMessage: `We could not access the appropriate resources. You can try reloating the page
-      or try again at a later time.`,
+      defaultMessage: `We could not access the appropriate resources. You can try reloading the page or come back again at a later time.`,
       description:
         'Helpful text for the generic error message (random API request failure).',
       id: 'components.ErrorComponents.generic.text',
@@ -140,6 +140,21 @@ const messages = {
         'We could not publish this video as a VOD. Please retry later',
       description: 'Error message when publish a live to VOD fails.',
       id: 'components.ErrorComponents.liveToVod.text',
+    },
+  },
+  liveStopped: {
+    text: {
+      defaultMessage:
+        'This live has now ended. If the host decides to publish the recording, the video will be available here in a while.',
+      description:
+        'Text explaining that a live has ended and that the VOD may be available soon.',
+      id: 'components.ErrorComponents.liveStopped.text',
+    },
+    title: {
+      defaultMessage: 'This live has ended',
+      description:
+        'Title for a user without update permission when a live is stopped or stopping',
+      id: 'components.ErrorComponents.liveStopped.title',
     },
   },
 };

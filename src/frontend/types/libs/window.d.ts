@@ -6,6 +6,10 @@ declare global {
     converse: {
       insertInto: (container: HTMLElement) => void;
       initialize: (options: any) => void;
+      plugins: {
+        add: (name: string, plugin: any) => void;
+      };
     };
+    JitsiMeetExternalAPI: JitsiMeetExternalAPI;
   }
 }

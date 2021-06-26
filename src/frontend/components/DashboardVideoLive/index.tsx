@@ -1,49 +1,36 @@
 import { Box, Heading, Text } from 'grommet';
-import React, { useEffect } from 'react';
+import React, { lazy, useEffect } from 'react';
 import { defineMessages, FormattedMessage } from 'react-intl';
 
 import { appData } from '../../data/appData';
 import { useVideo } from '../../data/stores/useVideo';
 import { API_ENDPOINT } from '../../settings';
-import { modelName } from '../../types/models';
-import { Video, liveState } from '../../types/tracks';
+import { Video, liveState, LiveModeType } from '../../types/tracks';
 import { report } from '../../utils/errors/report';
-import { CHAT_ROUTE } from '../Chat/route';
-import { PLAYER_ROUTE } from '../routes';
 import { DashboardVideoLiveStartButton } from '../DashboardVideoLiveStartButton';
-import { DashboardVideoLiveStopButton } from '../DashboardVideoLiveStopButton';
-import { DashboardButtonWithLink } from '../DashboardPaneButtons';
+import { DashboardVideoLiveRunning } from '../DashboardVideoLiveRunning';
+import { DashboardVideoLiveConfigureButton } from '../DashboardVideoLiveConfigureButton';
+
+const DashboardVideoLiveRaw = lazy(() => import('../DashboardVideoLiveRaw'));
+const DashboardVideoLiveJitsi = lazy(
+  () => import('../DashboardVideoLiveJitsi'),
+);
 
 const messages = defineMessages({
-  title: {
+  raw: {
     defaultMessage: 'Streaming link',
     description: 'DashboardVideoLive main title.',
-    id: 'components.DashboardVideoLive.title',
+    id: 'components.DashboardVideoLive.raw',
   },
-  streamLink: {
-    defaultMessage: 'Stream link',
-    description: 'link to use to stream a video.',
-    id: 'components.DashboardVideoLive.streamLink',
+  jitsi: {
+    defaultMessage: 'Jitsi Streaming',
+    description: 'DashboardVideoLive jitsi title.',
+    id: 'components.DashboardVideoLive.jitsi',
   },
   url: {
     defaultMessage: 'url',
     description: 'Video url streaming.',
     id: 'components.DashboardVideoLive.url',
-  },
-  streamKey: {
-    defaultMessage: 'stream key',
-    description: 'Video key streaming.',
-    id: 'components.DashboardVideoLive.streamKey',
-  },
-  showLive: {
-    defaultMessage: 'show live',
-    description: 'button to redirect use to video player.',
-    id: 'components.DashboardVideoLive.showLive',
-  },
-  chatOnly: {
-    defaultMessage: 'show chat only',
-    description: 'button to redirect to the chat only view.',
-    id: 'components.DashboardVideoLive.chatOnly',
   },
   liveCreating: {
     defaultMessage:
@@ -116,36 +103,17 @@ export const DashboardVideoLive = ({ video }: DashboardVideoLiveProps) => {
     }
   }, [video.live_state]);
 
-  const endpointIdentifier = /^(rtmp:\/\/.*)\/(.*)$/;
-  const endpoints = video.live_info.medialive!.input.endpoints.map(
-    (endpoint) => {
-      const matches = endpoint.match(endpointIdentifier);
-      if (matches) {
-        return (
-          <Box key={matches[2]}>
-            <Heading level={4}>
-              <FormattedMessage {...messages.streamLink} />
-            </Heading>
-            <ul>
-              <li>
-                <FormattedMessage {...messages.url} />: {matches[1]}
-              </li>
-              <li>
-                <FormattedMessage {...messages.streamKey} />: {matches[2]}
-              </li>
-            </ul>
-          </Box>
-        );
-      }
-    },
-  );
-
   return (
     <Box>
       <Heading level={2}>
-        <FormattedMessage {...messages.title} />
+        <FormattedMessage {...messages[video.live_type!]} />
       </Heading>
-      <Box>{endpoints}</Box>
+      {video.live_type === LiveModeType.RAW && (
+        <DashboardVideoLiveRaw video={video} />
+      )}
+      {video.live_type === LiveModeType.JITSI && (
+        <DashboardVideoLiveJitsi video={video} />
+      )}
       <Box direction={'row'} justify={'center'} margin={'small'}>
         {video.live_state === liveState.CREATING && (
           <Text>
@@ -153,7 +121,15 @@ export const DashboardVideoLive = ({ video }: DashboardVideoLiveProps) => {
           </Text>
         )}
         {video.live_state === liveState.IDLE && (
-          <DashboardVideoLiveStartButton video={video} />
+          <React.Fragment>
+            {video.live_type === LiveModeType.RAW && (
+              <DashboardVideoLiveConfigureButton
+                video={video}
+                type={LiveModeType.JITSI}
+              />
+            )}
+            <DashboardVideoLiveStartButton video={video} />
+          </React.Fragment>
         )}
         {video.live_state === liveState.STARTING && (
           <Text>
@@ -161,19 +137,7 @@ export const DashboardVideoLive = ({ video }: DashboardVideoLiveProps) => {
           </Text>
         )}
         {video.live_state === liveState.RUNNING && (
-          <React.Fragment>
-            <DashboardButtonWithLink
-              label={<FormattedMessage {...messages.chatOnly} />}
-              primary={false}
-              to={CHAT_ROUTE()}
-            />
-            <DashboardButtonWithLink
-              label={<FormattedMessage {...messages.showLive} />}
-              primary={false}
-              to={PLAYER_ROUTE(modelName.VIDEOS)}
-            />
-            <DashboardVideoLiveStopButton video={video} />
-          </React.Fragment>
+          <DashboardVideoLiveRunning video={video} />
         )}
         {video.live_state === liveState.STOPPED && (
           <Text>

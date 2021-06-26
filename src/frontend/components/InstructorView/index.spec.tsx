@@ -17,13 +17,8 @@ jest.mock('../../data/appData', () => ({
 }));
 
 describe('<InstructorView />', () => {
-  const video = videoMockFactory({
-    id: 'bc5b2a9a-4963-4a55-bb79-b94489a8164f',
-    playlist: {
-      title: 'foo',
-      lti_id: 'foo+context_id',
-    },
-  });
+  const video = videoMockFactory();
+
   it('renders the instructor controls', () => {
     mockDecodedJwt = {
       maintenance: false,
@@ -63,7 +58,7 @@ describe('<InstructorView />', () => {
     );
 
     getByText(
-      'This video is read-only because it belongs to another course: foo+context_id',
+      `This video is read-only because it belongs to another course: ${video.playlist.lti_id}`,
     );
     expect(queryByText('Go to Dashboard')).toBeNull();
   });

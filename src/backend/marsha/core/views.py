@@ -2,6 +2,7 @@
 from abc import ABC, abstractmethod
 import json
 from logging import getLogger
+from urllib.parse import unquote
 import uuid
 
 from django.conf import settings
@@ -9,6 +10,7 @@ from django.core.cache import cache
 from django.core.exceptions import (
     ImproperlyConfigured,
     PermissionDenied,
+    SuspiciousOperation,
     ValidationError as DjangoValidationError,
 )
 from django.templatetags.static import static
@@ -19,13 +21,15 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import View
 from django.views.generic.base import TemplateResponseMixin, TemplateView
 
+from oauthlib import oauth1
 from pylti.common import LTIException
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.views import exception_handler as drf_exception_handler
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import AccessToken
 from waffle import mixins, switch_is_active
 
-from .defaults import SENTRY, VIDEO_LIVE
+from .defaults import JITSI, SENTRY, VIDEO_LIVE
 from .lti import LTI
 from .lti.utils import (
     PortabilityError,
@@ -33,7 +37,7 @@ from .lti.utils import (
     get_selectable_resources,
 )
 from .models import Document, Playlist, Video
-from .models.account import NONE, ConsumerSite, LTIPassport
+from .models.account import NONE, LTIPassport
 from .serializers import (
     DocumentSelectLTISerializer,
     DocumentSerializer,
@@ -41,6 +45,7 @@ from .serializers import (
     VideoSerializer,
 )
 from .utils.react_locales_utils import react_locale
+from .utils.url_utils import build_absolute_uri_behind_proxy
 
 
 logger = getLogger(__name__)
@@ -78,7 +83,6 @@ def _get_base_app_data():
         "static": {
             "svg": {
                 "icons": static("svg/icons.svg"),
-                "plyr": static("svg/plyr.svg"),
             }
         },
     }
@@ -99,7 +103,7 @@ class SiteView(mixins.WaffleSwitchMixin, TemplateView):
         """Build the context necessary to run the frontend app for the site."""
         jwt_token = AccessToken()
         jwt_token.payload["resource_id"] = str(self.request.user.id)
-        jwt_token.payload["user_id"] = str(self.request.user.id)
+        jwt_token.payload["user"] = {"id": str(self.request.user.id)}
 
         app_data = _get_base_app_data()
         app_data.update(
@@ -222,6 +226,7 @@ class BaseLTIView(ABC, TemplateResponseMixin, View):
         permissions = {"can_access_dashboard": False, "can_update": False}
 
         user_id = getattr(lti, "user_id", None) if lti else None
+        session_id = str(uuid.uuid4())
 
         if app_data is None:
             resource = (
@@ -241,6 +246,7 @@ class BaseLTIView(ABC, TemplateResponseMixin, View):
                     "flags": {
                         VIDEO_LIVE: switch_is_active(VIDEO_LIVE),
                         SENTRY: switch_is_active(SENTRY),
+                        JITSI: settings.JITSI_ENABLED,
                     },
                     "resource": self.serializer_class(
                         resource,
@@ -250,14 +256,17 @@ class BaseLTIView(ABC, TemplateResponseMixin, View):
                             else False,
                             "roles": lti.roles if lti else [],
                             "user_id": user_id,
+                            "session_id": session_id,
                         },
                     ).data
                     if resource
                     else None,
                     "state": "success",
                     "player": settings.VIDEO_PLAYER,
+                    "uploadPollInterval": settings.FRONT_UPLOAD_POLL_INTERVAL,
                 }
             )
+
             if lti is None or lti.is_student:
                 cache.set(cache_key, app_data, settings.APP_DATA_CACHE_DURATION)
 
@@ -275,7 +284,7 @@ class BaseLTIView(ABC, TemplateResponseMixin, View):
             jwt_token = AccessToken()
             jwt_token.payload.update(
                 {
-                    "session_id": str(uuid.uuid4()),
+                    "session_id": session_id,
                     "context_id": lti.context_id
                     if lti
                     else app_data["resource"]["playlist"]["lti_id"],
@@ -291,7 +300,10 @@ class BaseLTIView(ABC, TemplateResponseMixin, View):
             )
 
             if user_id:
-                jwt_token.payload["user_id"] = user_id
+                jwt_token.payload["user"] = {
+                    "username": lti.username,
+                    "id": user_id,
+                }
 
             app_data["jwt"] = str(jwt_token)
 
@@ -411,60 +423,6 @@ class DocumentView(BaseLTIView):
 
 @method_decorator(csrf_exempt, name="dispatch")
 @method_decorator(xframe_options_exempt, name="dispatch")
-class LTIRespondView(TemplateResponseMixin, View):
-    """LTI view called to respond to a consumer.
-
-    ie. after a deep linking content selection.
-
-    """
-
-    template_name = "core/form_autosubmit.html"
-
-    # pylint: disable=unused-argument
-    def post(self, request, *args, **kwargs):
-        """Respond to POST request.
-
-        Renders a form autosubmitted to a LTI consumer with signed parameters.
-
-        Parameters
-        ----------
-        request : Request
-            passed by Django
-        args : list
-            positional extra arguments
-        kwargs : dictionary
-            keyword extra arguments
-        Returns
-        -------
-        HTML
-            generated from applying the data to the template
-
-        """
-        lti = LTI(self.request)
-        try:
-            lti.verify()
-        except LTIException as error:
-            raise PermissionDenied from error
-
-        content_item_return_url = self.request.POST.get("content_item_return_url")
-
-        # filters out oauth parameters
-        lti_parameters = {
-            key: value
-            for (key, value) in self.request.POST.items()
-            if "oauth" not in key and key not in ("content_item_return_url",)
-        }
-
-        # generate signature
-        lti_parameters = lti.sign_post_request(content_item_return_url, lti_parameters)
-
-        return self.render_to_response(
-            {"form_action": content_item_return_url, "form_data": lti_parameters}
-        )
-
-
-@method_decorator(csrf_exempt, name="dispatch")
-@method_decorator(xframe_options_exempt, name="dispatch")
 class LTISelectView(TemplateResponseMixin, View):
     """LTI view called to select LTI content through Deep Linking.
 
@@ -486,7 +444,10 @@ class LTISelectView(TemplateResponseMixin, View):
 
         def _manage_exception(error):
             logger.warning(str(error))
-            return {"state": "error"}
+            return {
+                "frontend": "LTI",
+                "state": "error",
+            }
 
         lti = LTI(self.request)
 
@@ -547,17 +508,27 @@ class LTISelectView(TemplateResponseMixin, View):
 
         lti_select_form_data = self.request.POST.copy()
         lti_select_form_data["lti_message_type"] = "ContentItemSelection"
+
+        jwt_token = AccessToken()
+        jwt_token.payload["lti_select_form_data"] = lti_select_form_data
+
+        new_document_url = build_absolute_uri_behind_proxy(
+            self.request,
+            reverse("document_lti_view", args=[new_uuid]),
+        )
+
+        new_video_url = build_absolute_uri_behind_proxy(
+            self.request,
+            reverse("video_lti_view", args=[new_uuid]),
+        )
+
         app_data.update(
             {
                 "frontend": "LTI",
                 "lti_select_form_action_url": reverse("respond_lti_view"),
-                "lti_select_form_data": lti_select_form_data,
-                "new_document_url": self.request.build_absolute_uri(
-                    reverse("document_lti_view", args=[new_uuid])
-                ),
-                "new_video_url": self.request.build_absolute_uri(
-                    reverse("video_lti_view", args=[new_uuid])
-                ),
+                "lti_select_form_data": {"jwt": str(jwt_token)},
+                "new_document_url": new_document_url,
+                "new_video_url": new_video_url,
                 "documents": documents,
                 "videos": videos,
             }
@@ -590,65 +561,20 @@ class LTISelectView(TemplateResponseMixin, View):
 
 @method_decorator(csrf_exempt, name="dispatch")
 @method_decorator(xframe_options_exempt, name="dispatch")
-class DevelopmentLTIView(TemplateView):
-    """A development view with iframe POST / plain POST helpers.
+class LTIRespondView(TemplateResponseMixin, View):
+    """LTI view called to respond to a consumer.
 
-    Not available outside of DEBUG = true environments.
+    ie. after a deep linking content selection.
 
     """
 
-    template_name = "core/lti_development.html"
-
-    def get_context_data(self, **kwargs):
-        """Generate a UUID to pre-populate the `uuid` fields in the LTI request form.
-
-        Parameters
-        ----------
-        kwargs : dictionary
-            keyword extra arguments
-
-        Returns
-        -------
-        dictionary
-            context for template rendering
-
-        """
-        domain = self.request.build_absolute_uri("/").split("/")[2]
-        try:
-            consumer_site = ConsumerSite.objects.get(domain=domain)
-        except ConsumerSite.DoesNotExist:
-            consumer_site, _ = ConsumerSite.objects.get_or_create(
-                domain=domain, name=domain
-            )
-
-        try:
-            playlist = Playlist.objects.get(consumer_site=consumer_site)
-        except Playlist.DoesNotExist:
-            playlist, _ = Playlist.objects.get_or_create(
-                consumer_site=consumer_site, title=domain, lti_id=domain
-            )
-
-        passport, _ = LTIPassport.objects.get_or_create(playlist=playlist)
-
-        oauth_dict = {
-            "oauth_consumer_key": passport.oauth_consumer_key,
-        }
-
-        return {
-            "domain": domain,
-            "uuid": uuid.uuid4(),
-            "select_context_id": playlist.lti_id,
-            "select_content_item_return_url": self.request.build_absolute_uri(
-                reverse("lti-development-view")
-            ),
-            "oauth_dict": oauth_dict,
-        }
+    template_name = "core/form_autosubmit.html"
 
     # pylint: disable=unused-argument
     def post(self, request, *args, **kwargs):
         """Respond to POST request.
 
-        Context populated with POST request.
+        Renders a form autosubmitted to a LTI consumer with signed parameters.
 
         Parameters
         ----------
@@ -658,11 +584,81 @@ class DevelopmentLTIView(TemplateView):
             positional extra arguments
         kwargs : dictionary
             keyword extra arguments
-
         Returns
         -------
         HTML
             generated from applying the data to the template
 
         """
-        return self.render_to_response({"content_selected": self.request.POST})
+        try:
+            jwt_token = AccessToken(self.request.POST.get("jwt", ""))
+            jwt_token.verify()
+        except TokenError as error:
+            logger.warning(str(error))
+            raise PermissionDenied from error
+
+        try:
+            lti_select_form_data = jwt_token.payload.get("lti_select_form_data")
+            content_item_return_url = lti_select_form_data.get(
+                "content_item_return_url"
+            )
+            if not content_item_return_url or "content_items" not in request.POST:
+                raise SuspiciousOperation
+
+            # filters out oauth parameters
+            lti_parameters = {
+                key: value
+                for (key, value) in lti_select_form_data.items()
+                if "oauth" not in key
+            }
+            lti_parameters.update(
+                {"content_items": self.request.POST.get("content_items")}
+            )
+        except AttributeError as error:
+            logger.warning(str(error))
+            raise SuspiciousOperation from error
+
+        try:
+            passport = LTIPassport.objects.get(
+                oauth_consumer_key=lti_select_form_data.get("oauth_consumer_key"),
+                is_enabled=True,
+            )
+        except LTIPassport.DoesNotExist as error:
+            logger.warning(str(error))
+            raise PermissionDenied from error
+
+        try:
+            client = oauth1.Client(
+                client_key=passport.oauth_consumer_key,
+                client_secret=passport.shared_secret,
+            )
+            # Compute Authorization header which looks like:
+            # Authorization: OAuth oauth_nonce="80966668944732164491378916897",
+            # oauth_timestamp="1378916897",
+            # oauth_version="1.0", oauth_signature_method="HMAC-SHA1",
+            # oauth_consumer_key="",
+            # oauth_signature="frVp4JuvT1mVXlxktiAUjQ7%2F1cw%3D"
+            _uri, headers, _body = client.sign(
+                content_item_return_url,
+                http_method="POST",
+                body=lti_parameters,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        except ValueError as error:
+            logger.warning(str(error))
+            raise SuspiciousOperation from error
+
+        # Parse headers to pass to template as part of context:
+        oauth_dict = dict(
+            param.strip().replace('"', "").split("=")
+            for param in headers["Authorization"].split(",")
+        )
+
+        oauth_dict["oauth_signature"] = unquote(oauth_dict["oauth_signature"])
+        oauth_dict["oauth_nonce"] = oauth_dict.pop("OAuth oauth_nonce")
+
+        lti_parameters.update(oauth_dict)
+
+        return self.render_to_response(
+            {"form_action": content_item_return_url, "form_data": lti_parameters}
+        )

@@ -1,9 +1,9 @@
 import { cleanup, render, screen, act } from '@testing-library/react';
 import fetchMock from 'fetch-mock';
-import React from 'react';
+import React, { Suspense } from 'react';
 
 import { modelName } from '../../types/models';
-import { liveState, uploadState } from '../../types/tracks';
+import { LiveModeType, liveState, uploadState } from '../../types/tracks';
 import { report } from '../../utils/errors/report';
 import { Deferred } from '../../utils/tests/Deferred';
 import { videoMockFactory } from '../../utils/tests/factories';
@@ -18,6 +18,7 @@ jest.mock('../../data/appData', () => ({
   appData: {
     jwt: 'cool_token_m8',
     flags: {},
+    uploadPollInterval: 60,
   },
 }));
 jest.mock('../../utils/errors/report', () => ({ report: jest.fn() }));
@@ -33,24 +34,20 @@ describe('<DashboardVideoPane />', () => {
   });
 
   it('redirects to error when it fails to fetch the video', async () => {
-    fetchMock.mock('/api/videos/43/', () => {
+    const video = videoMockFactory({ upload_state: PROCESSING });
+    fetchMock.mock(`/api/videos/${video.id}/`, () => {
       throw new Error('Failed request');
     });
     render(
       wrapInIntlProvider(
-        wrapInRouter(
-          <DashboardVideoPane
-            video={videoMockFactory({ upload_state: PROCESSING })}
-          />,
-          [
-            {
-              path: FULL_SCREEN_ERROR_ROUTE(),
-              render: ({ match }) => (
-                <span>{`Error Component: ${match.params.code}`}</span>
-              ),
-            },
-          ],
-        ),
+        wrapInRouter(<DashboardVideoPane video={video} />, [
+          {
+            path: FULL_SCREEN_ERROR_ROUTE(),
+            render: ({ match }) => (
+              <span>{`Error Component: ${match.params.code}`}</span>
+            ),
+          },
+        ]),
       ),
     );
 
@@ -64,7 +61,7 @@ describe('<DashboardVideoPane />', () => {
     const file = new File(['(⌐□_□)'], 'course.mp4', { type: 'video/mp4' });
     const video = videoMockFactory({ upload_state: PENDING });
     let deferred = new Deferred();
-    fetchMock.mock('/api/videos/43/', deferred.promise);
+    fetchMock.mock(`/api/videos/${video.id}/`, deferred.promise);
 
     const { rerender } = render(
       <UploadManagerContext.Provider
@@ -141,7 +138,7 @@ describe('<DashboardVideoPane />', () => {
       deferred.resolve(JSON.stringify({ ...video, upload_state: PROCESSING })),
     );
 
-    expect(fetchMock.lastCall()![0]).toEqual('/api/videos/43/');
+    expect(fetchMock.lastCall()![0]).toEqual(`/api/videos/${video.id}/`);
     expect(fetchMock.lastCall()![1]!.headers).toEqual({
       Authorization: 'Bearer cool_token_m8',
     });
@@ -153,7 +150,7 @@ describe('<DashboardVideoPane />', () => {
     // The video will be ready in further responses
     fetchMock.restore();
     deferred = new Deferred();
-    fetchMock.mock('/api/videos/43/', deferred.promise);
+    fetchMock.mock(`/api/videos/${video.id}/`, deferred.promise);
 
     // Second backend call
     jest.advanceTimersByTime(1000 * 60 + 200);
@@ -161,7 +158,7 @@ describe('<DashboardVideoPane />', () => {
       deferred.resolve(JSON.stringify({ ...video, upload_state: READY })),
     );
 
-    expect(fetchMock.lastCall()![0]).toEqual('/api/videos/43/');
+    expect(fetchMock.lastCall()![0]).toEqual(`/api/videos/${video.id}/`);
     expect(fetchMock.lastCall()![1]!.headers).toEqual({
       Authorization: 'Bearer cool_token_m8',
     });
@@ -340,23 +337,26 @@ describe('<DashboardVideoPane />', () => {
       const { getByText, queryByText } = render(
         wrapInIntlProvider(
           wrapInRouter(
-            <DashboardVideoPane
-              video={videoMockFactory({
-                is_ready_to_show: false,
-                upload_state: state,
-                live_state: liveState.IDLE,
-                live_info: {
-                  medialive: {
-                    input: {
-                      endpoints: [
-                        'https://live_endpoint1',
-                        'https://live_endpoint2',
-                      ],
+            <Suspense fallback="loading...">
+              <DashboardVideoPane
+                video={videoMockFactory({
+                  is_ready_to_show: false,
+                  upload_state: state,
+                  live_state: liveState.IDLE,
+                  live_info: {
+                    medialive: {
+                      input: {
+                        endpoints: [
+                          'https://live_endpoint1',
+                          'https://live_endpoint2',
+                        ],
+                      },
                     },
                   },
-                },
-              })}
-            />,
+                  live_type: LiveModeType.RAW,
+                })}
+              />
+            </Suspense>,
           ),
         ),
       );

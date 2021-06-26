@@ -40,7 +40,9 @@ class SiteViewTestCase(TestCase):
         context = json.loads(unescape(match.group(1)))
         jwt_token = AccessToken(context.get("jwt"))
         self.assertEqual(jwt_token.payload["resource_id"], str(user.id))
-        self.assertEqual(jwt_token.payload["user_id"], str(user.id))
+        jwt_token.payload["user"] = {
+            "id": str(user.id),
+        }
 
         self.assertEqual(context.get("sentry_dsn"), "https://sentry.dsn")
         self.assertEqual(context.get("environment"), "test")
@@ -49,7 +51,7 @@ class SiteViewTestCase(TestCase):
         self.assertEqual(context.get("flags"), {"sentry": True})
         self.assertEqual(
             context.get("static"),
-            {"svg": {"icons": "/static/svg/icons.svg", "plyr": "/static/svg/plyr.svg"}},
+            {"svg": {"icons": "/static/svg/icons.svg"}},
         )
 
     @override_switch("site", active=False)

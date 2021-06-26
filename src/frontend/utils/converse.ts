@@ -4,6 +4,7 @@ import 'converse.js/dist/emojis.js';
 import 'converse.js/dist/icons.js';
 
 import { converse } from './window';
+import { getDecodedJwt } from '../data/appData';
 import { XMPP } from '../types/tracks';
 
 export const converseMounter = () => {
@@ -13,6 +14,15 @@ export const converseMounter = () => {
     if (hasBeenInitialized) {
       converse.insertInto(document.querySelector(containerName)!);
     } else {
+      converse.plugins.add('marsha', {
+        initialize() {
+          const _converse = this._converse;
+
+          window.addEventListener('beforeunload', () => {
+            _converse.api.user.logout();
+          });
+        },
+      });
       converse.initialize({
         allow_contact_requests: false,
         allow_logout: false,
@@ -29,8 +39,12 @@ export const converseMounter = () => {
         hide_muc_participants: true,
         jid: xmpp.jid,
         modtools_disable_assign: true,
+        muc_instant_rooms: false,
+        nickname: getDecodedJwt().user?.username,
         root: document.querySelector(containerName),
+        show_client_info: false,
         singleton: true,
+        theme: 'concord',
         view_mode: 'embedded',
         visible_toolbar_buttons: {
           call: false,
@@ -38,6 +52,7 @@ export const converseMounter = () => {
           spoiler: false,
           toggle_occupants: false,
         },
+        whitelisted_plugins: ['marsha'],
       });
       hasBeenInitialized = true;
     }

@@ -11,10 +11,11 @@ from botocore.signers import CloudFrontSigner
 from rest_framework import serializers
 from rest_framework_simplejwt.models import TokenUser
 
-from ..defaults import IDLE, LIVE_CHOICES, RUNNING, STOPPED
+from ..defaults import IDLE, JITSI, LIVE_CHOICES, LIVE_TYPE_CHOICES, RUNNING, STOPPED
 from ..models import Thumbnail, TimedTextTrack, Video
 from ..models.account import ADMINISTRATOR, INSTRUCTOR, LTI_ROLES
 from ..utils import cloudfront_utils, time_utils, xmpp_utils
+from ..utils.url_utils import build_absolute_uri_behind_proxy
 from .base import TimestampField
 from .playlist import PlaylistLiteSerializer
 
@@ -72,6 +73,15 @@ class TimedTextTrackSerializer(serializers.ModelSerializer):
         # user here is a video as it comes from the JWT
         # It is named "user" by convention in the `rest_framework_simplejwt` dependency we use.
         user = self.context["request"].user
+        # Set the video field from the payload if there is one and the user is identified
+        # as a proper user object through access rights
+        if (
+            self.initial_data.get("video")
+            and user.token.get("user")
+            and user.token["resource_id"] == user.token.get("user", {}).get("id")
+        ):
+            validated_data["video_id"] = self.initial_data.get("video")
+        # If the user just has a token for a video, force the video ID on the timed text track
         if not validated_data.get("video_id") and isinstance(user, TokenUser):
             validated_data["video_id"] = user.id
         return super().create(validated_data)
@@ -294,6 +304,12 @@ class UpdateLiveStateSerializer(serializers.Serializer):
     logGroupName = serializers.CharField()
 
 
+class InitLiveStateSerializer(serializers.Serializer):
+    """A serializer to validate data submitted on the initiate-live API endpoint."""
+
+    type = serializers.ChoiceField(LIVE_TYPE_CHOICES)
+
+
 class VideoBaseSerializer(serializers.ModelSerializer):
     """Base Serializer to factorize common Video attributes."""
 
@@ -435,6 +451,7 @@ class VideoSerializer(VideoBaseSerializer):
             "playlist",
             "live_info",
             "live_state",
+            "live_type",
             "xmpp",
         )
         read_only_fields = (
@@ -471,17 +488,16 @@ class VideoSerializer(VideoBaseSerializer):
         Dictionnary
             A dictionary containing all info needed to manage a connection to a xmpp server.
         """
-        if (
-            settings.LIVE_CHAT_ENABLED
-            and obj.live_state is not None
-            and self.context.get("user_id", False)
-        ):
+        user_id = self.context.get("user", {}).get("id") or self.context.get(
+            "session_id"
+        )
+        if settings.LIVE_CHAT_ENABLED and user_id and obj.live_state is not None:
             roles = self.context.get("roles", [])
             is_admin = bool(LTI_ROLES[ADMINISTRATOR] & set(roles))
             is_instructor = bool(LTI_ROLES[INSTRUCTOR] & set(roles))
             token = xmpp_utils.generate_jwt(
                 str(obj.id),
-                self.context["user_id"],
+                user_id,
                 "owner" if is_admin or is_instructor else "member",
                 timezone.now() + timedelta(days=1),
             )
@@ -517,13 +533,27 @@ class VideoSerializer(VideoBaseSerializer):
         if obj.live_state is None or can_return_live_info is False:
             return {}
 
-        return {
+        live_info = {
             "medialive": {
                 "input": {
                     "endpoints": obj.live_info["medialive"]["input"]["endpoints"],
                 }
-            }
+            },
         }
+
+        if settings.JITSI_ENABLED and obj.live_type == JITSI:
+            live_info.update(
+                {
+                    "jitsi": {
+                        "external_api_url": settings.JITSI_EXTERNAL_API_URL,
+                        "domain": settings.JITSI_DOMAIN,
+                        "config_overwrite": settings.JITSI_CONFIG_OVERWRITE,
+                        "interface_config_overwrite": settings.JITSI_INTERFACE_CONFIG_OVERWRITE,
+                    }
+                }
+            )
+
+        return live_info
 
     def get_has_transcript(self, obj):
         """Compute if should_use_subtitle_as_transcript behavior is disabled.
@@ -582,6 +612,7 @@ class VideoSelectLTISerializer(VideoBaseSerializer):
             the LTI url to be used by LTI consumers
 
         """
-        return self.context["request"].build_absolute_uri(
-            reverse("video_lti_view", args=[obj.id])
+        return build_absolute_uri_behind_proxy(
+            self.context["request"],
+            reverse("video_lti_view", args=[obj.id]),
         )

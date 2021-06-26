@@ -132,9 +132,8 @@ export const UploadManager = ({ children }: React.PropsWithChildren<{}>) => {
  * Allow state consumers & uploaders to access the upload manager.
  */
 export const useUploadManager = () => {
-  const { uploadManagerState, setUploadState } = useContext(
-    UploadManagerContext,
-  );
+  const { uploadManagerState, setUploadState } =
+    useContext(UploadManagerContext);
 
   const addUpload = (objectType: modelName, objectId: string, file: File) => {
     setUploadState((state) => ({
@@ -149,5 +148,16 @@ export const useUploadManager = () => {
     }));
   };
 
-  return { addUpload, uploadManagerState };
+  const resetUpload = (objectId: string) => {
+    setUploadState((state) =>
+      Object.keys(state)
+        .filter((resourceId) => resourceId !== objectId)
+        .reduce(
+          (acc, resourceId) => ({ ...acc, [resourceId]: state[resourceId] }),
+          {},
+        ),
+    );
+  };
+
+  return { addUpload, resetUpload, uploadManagerState };
 };

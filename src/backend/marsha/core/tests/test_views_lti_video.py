@@ -14,9 +14,11 @@ from rest_framework_simplejwt.tokens import AccessToken
 from waffle.testutils import override_switch
 
 from ..defaults import (
+    DELETED,
     HARVESTED,
     IDLE,
     PENDING,
+    RAW,
     READY,
     RUNNING,
     SENTRY,
@@ -44,6 +46,7 @@ class VideoLTIViewTestCase(TestCase):
     @mock.patch.object(LTI, "get_consumer_site")
     @override_settings(SENTRY_DSN="https://sentry.dsn")
     @override_settings(RELEASE="1.2.3")
+    @override_settings(JITSI_ENABLED=True)
     @override_settings(VIDEO_PLAYER="videojs")
     @override_switch(VIDEO_LIVE, active=True)
     @override_switch(SENTRY, active=True)
@@ -62,6 +65,7 @@ class VideoLTIViewTestCase(TestCase):
             "oauth_consumer_key": passport.oauth_consumer_key,
             "user_id": "56255f3807599c377bf0e5bf072359fd",
             "launch_presentation_locale": "fr",
+            "lis_person_sourcedid": "jane_doe",
         }
 
         mock_get_consumer_site.return_value = passport.consumer_site
@@ -77,7 +81,6 @@ class VideoLTIViewTestCase(TestCase):
         context = json.loads(unescape(match.group(1)))
         jwt_token = AccessToken(context.get("jwt"))
         self.assertEqual(jwt_token.payload["resource_id"], str(video.id))
-        self.assertEqual(jwt_token.payload["user_id"], data["user_id"])
         self.assertEqual(jwt_token.payload["context_id"], data["context_id"])
         self.assertEqual(jwt_token.payload["roles"], [data["roles"]])
         self.assertEqual(jwt_token.payload["locale"], "fr_FR")
@@ -89,11 +92,18 @@ class VideoLTIViewTestCase(TestCase):
             jwt_token.payload["course"],
             {"school_name": "ufr", "course_name": "mathematics", "course_run": "00001"},
         )
+        self.assertDictEqual(
+            jwt_token.payload["user"],
+            {
+                "username": "jane_doe",
+                "id": "56255f3807599c377bf0e5bf072359fd",
+            },
+        )
 
         self.assertEqual(context.get("state"), "success")
         self.assertEqual(
             context.get("static"),
-            {"svg": {"icons": "/static/svg/icons.svg", "plyr": "/static/svg/plyr.svg"}},
+            {"svg": {"icons": "/static/svg/icons.svg"}},
         )
         self.assertEqual(
             context.get("resource"),
@@ -116,6 +126,7 @@ class VideoLTIViewTestCase(TestCase):
                 },
                 "live_state": None,
                 "live_info": {},
+                "live_type": None,
                 "xmpp": None,
             },
         )
@@ -124,7 +135,9 @@ class VideoLTIViewTestCase(TestCase):
         self.assertEqual(context.get("environment"), "test")
         self.assertEqual(context.get("release"), "1.2.3")
         self.assertEqual(context.get("player"), "videojs")
-        self.assertEqual(context.get("flags"), {"video_live": True, "sentry": True})
+        self.assertEqual(
+            context.get("flags"), {"video_live": True, "sentry": True, "jitsi": True}
+        )
         # Make sure we only go through LTI verification once as it is costly (getting passport +
         # signature)
         self.assertEqual(mock_verify.call_count, 1)
@@ -165,6 +178,7 @@ class VideoLTIViewTestCase(TestCase):
                     },
                 },
             },
+            live_type=RAW,
             upload_state=PENDING,
         )
         data = {
@@ -173,6 +187,7 @@ class VideoLTIViewTestCase(TestCase):
             "roles": "instructor",
             "oauth_consumer_key": passport.oauth_consumer_key,
             "user_id": "56255f3807599c377bf0e5bf072359fd",
+            "lis_person_sourcedid": "jane_doe",
             "launch_presentation_locale": "fr",
         }
 
@@ -189,7 +204,13 @@ class VideoLTIViewTestCase(TestCase):
         context = json.loads(unescape(match.group(1)))
         jwt_token = AccessToken(context.get("jwt"))
         self.assertEqual(jwt_token.payload["resource_id"], str(video.id))
-        self.assertEqual(jwt_token.payload["user_id"], data["user_id"])
+        self.assertEqual(
+            jwt_token.payload["user"],
+            {
+                "username": "jane_doe",
+                "id": "56255f3807599c377bf0e5bf072359fd",
+            },
+        )
         self.assertEqual(jwt_token.payload["context_id"], data["context_id"])
         self.assertEqual(jwt_token.payload["roles"], [data["roles"]])
         self.assertEqual(jwt_token.payload["locale"], "fr_FR")
@@ -205,13 +226,13 @@ class VideoLTIViewTestCase(TestCase):
         self.assertEqual(context.get("state"), "success")
         self.assertEqual(
             context.get("static"),
-            {"svg": {"icons": "/static/svg/icons.svg", "plyr": "/static/svg/plyr.svg"}},
+            {"svg": {"icons": "/static/svg/icons.svg"}},
         )
         self.assertEqual(
             context.get("resource"),
             {
                 "active_stamp": None,
-                "is_ready_to_show": False,
+                "is_ready_to_show": True,
                 "show_download": True,
                 "description": video.description,
                 "id": str(video.id),
@@ -241,8 +262,9 @@ class VideoLTIViewTestCase(TestCase):
                                 "https://live_endpoint2",
                             ],
                         }
-                    }
+                    },
                 },
+                "live_type": RAW,
                 "xmpp": None,
             },
         )
@@ -265,7 +287,7 @@ class VideoLTIViewTestCase(TestCase):
     @override_settings(XMPP_CONFERENCE_DOMAIN="conference.xmpp-server.com")
     @override_settings(XMPP_DOMAIN="conference.xmpp-server.com")
     @override_settings(XMPP_JWT_SHARED_SECRET="xmpp_shared_secret")
-    def test_views_lti_video_instructor_live_mode_an_chat_on(
+    def test_views_lti_video_instructor_live_mode_and_chat_on(
         self, mock_get_consumer_site, mock_verify
     ):
         """Validate the format of the response for a live video.
@@ -299,6 +321,7 @@ class VideoLTIViewTestCase(TestCase):
                     },
                 },
             },
+            live_type=RAW,
             upload_state=PENDING,
         )
         data = {
@@ -307,6 +330,7 @@ class VideoLTIViewTestCase(TestCase):
             "roles": "instructor",
             "oauth_consumer_key": passport.oauth_consumer_key,
             "user_id": "56255f3807599c377bf0e5bf072359fd",
+            "lis_person_sourcedid": "jane_doe",
             "launch_presentation_locale": "fr",
         }
 
@@ -328,7 +352,13 @@ class VideoLTIViewTestCase(TestCase):
         context = json.loads(unescape(match.group(1)))
         jwt_token = AccessToken(context.get("jwt"))
         self.assertEqual(jwt_token.payload["resource_id"], str(video.id))
-        self.assertEqual(jwt_token.payload["user_id"], data["user_id"])
+        self.assertEqual(
+            jwt_token.payload["user"],
+            {
+                "username": "jane_doe",
+                "id": "56255f3807599c377bf0e5bf072359fd",
+            },
+        )
         self.assertEqual(jwt_token.payload["context_id"], data["context_id"])
         self.assertEqual(jwt_token.payload["roles"], [data["roles"]])
         self.assertEqual(jwt_token.payload["locale"], "fr_FR")
@@ -344,13 +374,13 @@ class VideoLTIViewTestCase(TestCase):
         self.assertEqual(context.get("state"), "success")
         self.assertEqual(
             context.get("static"),
-            {"svg": {"icons": "/static/svg/icons.svg", "plyr": "/static/svg/plyr.svg"}},
+            {"svg": {"icons": "/static/svg/icons.svg"}},
         )
         self.assertEqual(
             context.get("resource"),
             {
                 "active_stamp": None,
-                "is_ready_to_show": False,
+                "is_ready_to_show": True,
                 "show_download": True,
                 "description": video.description,
                 "id": str(video.id),
@@ -382,6 +412,7 @@ class VideoLTIViewTestCase(TestCase):
                         }
                     },
                 },
+                "live_type": RAW,
                 "xmpp": {
                     "bosh_url": "https://xmpp-server.com/http-bind?token=xmpp_jwt",
                     "conference_url": f"{video.id}@conference.xmpp-server.com",
@@ -433,6 +464,7 @@ class VideoLTIViewTestCase(TestCase):
                     },
                 },
             },
+            live_type=RAW,
             upload_state=PENDING,
         )
         data = {
@@ -441,6 +473,7 @@ class VideoLTIViewTestCase(TestCase):
             "roles": "student",
             "oauth_consumer_key": passport.oauth_consumer_key,
             "user_id": "56255f3807599c377bf0e5bf072359fd",
+            "lis_person_sourcedid": "jane_doe",
             "launch_presentation_locale": "fr",
         }
 
@@ -457,7 +490,13 @@ class VideoLTIViewTestCase(TestCase):
         context = json.loads(unescape(match.group(1)))
         jwt_token = AccessToken(context.get("jwt"))
         self.assertEqual(jwt_token.payload["resource_id"], str(video.id))
-        self.assertEqual(jwt_token.payload["user_id"], data["user_id"])
+        self.assertEqual(
+            jwt_token.payload["user"],
+            {
+                "username": "jane_doe",
+                "id": "56255f3807599c377bf0e5bf072359fd",
+            },
+        )
         self.assertEqual(jwt_token.payload["context_id"], data["context_id"])
         self.assertEqual(jwt_token.payload["roles"], [data["roles"]])
         self.assertEqual(jwt_token.payload["locale"], "fr_FR")
@@ -473,7 +512,7 @@ class VideoLTIViewTestCase(TestCase):
         self.assertEqual(context.get("state"), "success")
         self.assertEqual(
             context.get("static"),
-            {"svg": {"icons": "/static/svg/icons.svg", "plyr": "/static/svg/plyr.svg"}},
+            {"svg": {"icons": "/static/svg/icons.svg"}},
         )
         self.assertEqual(
             context.get("resource"),
@@ -502,6 +541,7 @@ class VideoLTIViewTestCase(TestCase):
                 },
                 "live_state": RUNNING,
                 "live_info": {},
+                "live_type": RAW,
                 "xmpp": None,
             },
         )
@@ -531,6 +571,7 @@ class VideoLTIViewTestCase(TestCase):
             "roles": "administrator",
             "oauth_consumer_key": passport.oauth_consumer_key,
             "user_id": "56255f3807599c377bf0e5bf072359fd",
+            "lis_person_sourcedid": "jane_doe",
             "launch_presentation_locale": "fr",
         }
 
@@ -558,6 +599,7 @@ class VideoLTIViewTestCase(TestCase):
             "roles": "administrator",
             "oauth_consumer_key": passport.oauth_consumer_key,
             "user_id": "56255f3807599c377bf0e5bf072359fd",
+            "lis_person_sourcedid": "jane_doe",
             "launch_presentation_locale": "fr",
         }
 
@@ -574,7 +616,13 @@ class VideoLTIViewTestCase(TestCase):
         context = json.loads(unescape(match.group(1)))
         jwt_token = AccessToken(context.get("jwt"))
         self.assertEqual(jwt_token.payload["resource_id"], str(video.id))
-        self.assertEqual(jwt_token.payload["user_id"], data["user_id"])
+        self.assertEqual(
+            jwt_token.payload["user"],
+            {
+                "username": "jane_doe",
+                "id": "56255f3807599c377bf0e5bf072359fd",
+            },
+        )
         self.assertEqual(jwt_token.payload["context_id"], data["context_id"])
         self.assertEqual(jwt_token.payload["roles"], [data["roles"]])
         self.assertEqual(jwt_token.payload["locale"], "fr_FR")
@@ -609,6 +657,7 @@ class VideoLTIViewTestCase(TestCase):
                 },
                 "live_state": None,
                 "live_info": {},
+                "live_type": None,
                 "xmpp": None,
             },
         )
@@ -632,7 +681,7 @@ class VideoLTIViewTestCase(TestCase):
             playlist__title="playlist-003",
             playlist__lti_id="course-v1:ufr+mathematics+00001",
             upload_state=random.choice(
-                [s[0] for s in STATE_CHOICES if s[0] != HARVESTED]
+                [s[0] for s in STATE_CHOICES if s[0] not in [DELETED, HARVESTED]]
             ),
             uploaded_on="2019-09-24 07:24:40+00",
             resolutions=[144, 240, 480, 720, 1080],
@@ -643,6 +692,7 @@ class VideoLTIViewTestCase(TestCase):
             "roles": "instructor",
             "oauth_consumer_key": passport.oauth_consumer_key,
             "user_id": "56255f3807599c377bf0e5bf072359fd",
+            "lis_person_sourcedid": "jane_doe",
             "launch_presentation_locale": "fr",
         }
 
@@ -720,6 +770,7 @@ class VideoLTIViewTestCase(TestCase):
                 },
                 "live_state": None,
                 "live_info": {},
+                "live_type": None,
                 "xmpp": None,
             },
         )
@@ -741,7 +792,7 @@ class VideoLTIViewTestCase(TestCase):
             playlist__consumer_site=passport.consumer_site,
             playlist__title="playlist-002",
             upload_state=random.choice(
-                [s[0] for s in STATE_CHOICES if s[0] != HARVESTED]
+                [s[0] for s in STATE_CHOICES if s[0] not in [DELETED, HARVESTED]]
             ),
             uploaded_on="2019-09-24 07:24:40+00",
             resolutions=[144, 240, 480],
@@ -752,6 +803,7 @@ class VideoLTIViewTestCase(TestCase):
             "roles": "student",
             "oauth_consumer_key": passport.oauth_consumer_key,
             "user_id": "56255f3807599c377bf0e5bf072359fd",
+            "lis_person_sourcedid": "jane_doe",
         }
         mock_get_consumer_site.return_value = passport.consumer_site
 
@@ -767,7 +819,13 @@ class VideoLTIViewTestCase(TestCase):
         context = json.loads(unescape(match.group(1)))
         jwt_token = AccessToken(context.get("jwt"))
         self.assertEqual(jwt_token.payload["resource_id"], str(video.id))
-        self.assertEqual(jwt_token.payload["user_id"], data["user_id"])
+        self.assertEqual(
+            jwt_token.payload["user"],
+            {
+                "username": "jane_doe",
+                "id": "56255f3807599c377bf0e5bf072359fd",
+            },
+        )
         self.assertEqual(jwt_token.payload["context_id"], data["context_id"])
         self.assertEqual(jwt_token.payload["roles"], [data["roles"]])
         self.assertEqual(jwt_token.payload["locale"], "en_US")
@@ -829,6 +887,7 @@ class VideoLTIViewTestCase(TestCase):
                 },
                 "live_state": None,
                 "live_info": {},
+                "live_type": None,
                 "xmpp": None,
             },
         )
@@ -859,6 +918,7 @@ class VideoLTIViewTestCase(TestCase):
             "roles": "student",
             "oauth_consumer_key": passport.oauth_consumer_key,
             "user_id": "56255f3807599c377bf0e5bf072359fd",
+            "lis_person_sourcedid": "jane_doe",
         }
         mock_get_consumer_site.return_value = passport.consumer_site
 
@@ -874,7 +934,13 @@ class VideoLTIViewTestCase(TestCase):
         context = json.loads(unescape(match.group(1)))
         jwt_token = AccessToken(context.get("jwt"))
         self.assertEqual(jwt_token.payload["resource_id"], str(video.id))
-        self.assertEqual(jwt_token.payload["user_id"], data["user_id"])
+        self.assertEqual(
+            jwt_token.payload["user"],
+            {
+                "username": "jane_doe",
+                "id": "56255f3807599c377bf0e5bf072359fd",
+            },
+        )
         self.assertEqual(jwt_token.payload["context_id"], data["context_id"])
         self.assertEqual(jwt_token.payload["roles"], [data["roles"]])
         self.assertEqual(jwt_token.payload["locale"], "en_US")
@@ -936,6 +1002,7 @@ class VideoLTIViewTestCase(TestCase):
                 },
                 "live_state": None,
                 "live_info": {},
+                "live_type": None,
                 "xmpp": None,
             },
         )
@@ -957,7 +1024,7 @@ class VideoLTIViewTestCase(TestCase):
             playlist__consumer_site=passport.consumer_site,
             playlist__title="playlist-002",
             upload_state=random.choice(
-                [s[0] for s in STATE_CHOICES if s[0] != HARVESTED]
+                [s[0] for s in STATE_CHOICES if s[0] not in [DELETED, HARVESTED]]
             ),
             uploaded_on="2019-09-24 07:24:40+00",
             resolutions=[144, 240, 480, 720, 1080],
@@ -968,6 +1035,7 @@ class VideoLTIViewTestCase(TestCase):
             "roles": "student",
             "oauth_consumer_key": passport.oauth_consumer_key,
             "user_id": "56255f3807599c377bf0e5bf072359fd",
+            "lis_person_sourcedid": "jane_doe",
         }
         mock_get_consumer_site.return_value = passport.consumer_site
 
@@ -983,7 +1051,13 @@ class VideoLTIViewTestCase(TestCase):
         context = json.loads(unescape(match.group(1)))
         jwt_token = AccessToken(context.get("jwt"))
         self.assertEqual(jwt_token.payload["resource_id"], str(video.id))
-        self.assertEqual(jwt_token.payload["user_id"], data["user_id"])
+        self.assertEqual(
+            jwt_token.payload["user"],
+            {
+                "username": "jane_doe",
+                "id": "56255f3807599c377bf0e5bf072359fd",
+            },
+        )
         self.assertEqual(jwt_token.payload["context_id"], data["context_id"])
         self.assertEqual(jwt_token.payload["roles"], [data["roles"]])
         self.assertEqual(jwt_token.payload["locale"], "en_US")
@@ -1055,6 +1129,7 @@ class VideoLTIViewTestCase(TestCase):
                 },
                 "live_state": None,
                 "live_info": {},
+                "live_type": None,
                 "xmpp": None,
             },
         )
@@ -1127,6 +1202,7 @@ class VideoLTIViewTestCase(TestCase):
             "roles": "student",
             "oauth_consumer_key": passport.oauth_consumer_key,
             "user_id": "56255f3807599c377bf0e5bf072359fd",
+            "lis_person_sourcedid": "jane_doe",
         }
         mock_get_consumer_site.return_value = passport.consumer_site
 
@@ -1188,7 +1264,6 @@ class VideoLTIViewTestCase(TestCase):
                 "static": {
                     "svg": {
                         "icons": "/static/svg/icons.svg",
-                        "plyr": "/static/svg/plyr.svg",
                     }
                 },
             },
@@ -1214,6 +1289,7 @@ class VideoLTIViewTestCase(TestCase):
             "roles": "instructor",
             "oauth_consumer_key": passport.oauth_consumer_key,
             "user_id": "56255f3807599c377bf0e5bf072359fd",
+            "lis_person_sourcedid": "jane_doe",
         }
         mock_get_consumer_site.return_value = passport.consumer_site
 
@@ -1249,6 +1325,7 @@ class VideoLTIViewTestCase(TestCase):
             "roles": "instructor",
             "oauth_consumer_key": passport.oauth_consumer_key,
             "user_id": "56255f3807599c377bf0e5bf072359fd",
+            "lis_person_sourcedid": "jane_doe",
             "launch_presentation_locale": "fr",
         }
         mock_get_consumer_site.return_value = passport.consumer_site
@@ -1285,6 +1362,7 @@ class VideoLTIViewTestCase(TestCase):
             "roles": "instructor",
             "oauth_consumer_key": passport.oauth_consumer_key,
             "user_id": "56255f3807599c377bf0e5bf072359fd",
+            "lis_person_sourcedid": "jane_doe",
             "launch_presentation_locale": "fr",
         }
 
@@ -1340,6 +1418,7 @@ class VideoLTIViewTestCase(TestCase):
                 },
                 "live_state": None,
                 "live_info": {},
+                "live_type": None,
                 "xmpp": None,
             },
         )
@@ -1369,6 +1448,7 @@ class VideoLTIViewTestCase(TestCase):
             "roles": "instructor",
             "oauth_consumer_key": passport.oauth_consumer_key,
             "user_id": "56255f3807599c377bf0e5bf072359fd",
+            "lis_person_sourcedid": "jane_doe",
             "launch_presentation_locale": "fr",
         }
 
@@ -1417,6 +1497,7 @@ class VideoLTIViewTestCase(TestCase):
                 },
                 "live_state": None,
                 "live_info": {},
+                "live_type": None,
                 "xmpp": None,
             },
         )

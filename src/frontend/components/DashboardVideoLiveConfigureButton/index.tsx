@@ -3,9 +3,10 @@ import { defineMessages, FormattedMessage } from 'react-intl';
 import { Redirect } from 'react-router-dom';
 
 import { initiateLive } from '../../data/sideEffects/initiateLive';
+import { updateResource } from '../../data/sideEffects/updateResource';
 import { useVideo } from '../../data/stores/useVideo';
 import { modelName } from '../../types/models';
-import { Video } from '../../types/tracks';
+import { LiveModeType, Video } from '../../types/tracks';
 import { Nullable } from '../../utils/types';
 import { DASHBOARD_ROUTE } from '../Dashboard/route';
 import { DashboardButton } from '../DashboardPaneButtons';
@@ -13,10 +14,15 @@ import { FULL_SCREEN_ERROR_ROUTE } from '../ErrorComponents/route';
 import { Loader } from '../Loader';
 
 const messages = defineMessages({
-  btnConfigureLive: {
+  raw: {
     defaultMessage: 'Configure a live streaming',
     description: 'Dashboard button to configure a live streaming',
-    id: 'components.Dashboard.DashboardPaneButtons.videos.btnStartLive',
+    id: 'components.Dashboard.DashboardPaneButtons.videos.raw',
+  },
+  jitsi: {
+    defaultMessage: 'Launch Jitsi LiveStream',
+    description: 'Dashboard button to launch jitsi livestream',
+    id: 'components.Dashboard.DashboardPaneButtons.videos.jitsi',
   },
 });
 
@@ -25,10 +31,12 @@ type configureLiveStatus = 'pending' | 'success' | 'error';
 /** Props shape for the DashboardVideoLiveConfigureButton component. */
 export interface DashboardVideoLiveConfigureButtonProps {
   video: Video;
+  type: LiveModeType;
 }
 
 export const DashboardVideoLiveConfigureButton = ({
   video,
+  type,
 }: DashboardVideoLiveConfigureButtonProps) => {
   const [status, setStatus] = useState<Nullable<configureLiveStatus>>(null);
   const { updateVideo } = useVideo((state) => ({
@@ -38,7 +46,16 @@ export const DashboardVideoLiveConfigureButton = ({
   const configureLive = async () => {
     setStatus('pending');
     try {
-      const updatedVideo = await initiateLive(video);
+      const updatedVideo =
+        video.live_state !== null
+          ? await updateResource(
+              {
+                ...video,
+                live_type: type,
+              },
+              modelName.VIDEOS,
+            )
+          : await initiateLive(video, type);
       updateVideo(updatedVideo);
       setStatus('success');
     } catch (error) {
@@ -60,7 +77,7 @@ export const DashboardVideoLiveConfigureButton = ({
 
       <DashboardButton
         onClick={configureLive}
-        label={<FormattedMessage {...messages.btnConfigureLive} />}
+        label={<FormattedMessage {...messages[type]} />}
       />
     </React.Fragment>
   );

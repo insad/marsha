@@ -8,6 +8,57 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.20.1] - 2021-06-23
+
+### Fixed
+
+- Redirect instructor to the dashboard when live is stopped
+
+## [3.20.0] - 2021-06-18
+
+### Added
+
+- Display chat in dashboard during a jitsi live
+- Use chat when a live is publicly available
+- Set chat nickname when user is connected
+- Display a waiting message while live is not available
+- Add Playrwright testing (with basic cloud storage mocking)
+- Update circleci config to version 2.1
+- Add a parametrized cicrcleci job to run e2e tests on 3 browsers (chromium, firefox and webkit)
+- Move DevelopmentLTIView to a new development directory
+- Add a variable to set frontend video polling interval
+- Add a component responsible to manage public video dashboard
+- Add a waiting workflow while a live is not ready
+- Allow to play a youtube video in jitsi
+
+### Changed
+
+- Switch from classic to jitsi live when a classic is created
+- Use conversejs concord theme
+
+### Fixed
+
+- Prevent to display a deleted video
+- Disable video speed menu for live video
+- Manage jitsi recording interruption
+
+### Removed
+
+- Remove plyr player
+
+## [3.19.0] - 2021-05-10
+
+### Added
+
+- Jitsi streamed in marsha live
+
+### Fixed
+
+- Fetch fresh resource data after initiate-upload endpoint called
+- Reset upload manager state before starting a new upload
+
+## [3.18.0] - 2021-05-10
+
 ### Added
 
 - Chat feature implementing XMPP protocol
@@ -15,16 +66,23 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Add a LTI select view to allow LTI consumers to add a LTI content through Deep Linking
 - Display chat box without video player
 - Add a tests.utils module to share LTI request signature and refactor related tests
+- Install storybook
+- Add a button to easily copy RTMP infos
 
 ### Changed
 
 - The `lti_id` field is optional on Videos and Documents.
+- Open Video related API endpoints to playlist and org admins.
 - Clean built frontend files before each build
+- Variabilize live conf related to latency
+- Upgrade node to version 14, the current LTS
 
 ### Fixed
 
 - Frontend video type now allows Nullable urls.
 - Fix js public path on LTI select view.
+- Replace LTI verification in lti/respond view by JWT verification
+- Fix URLs schemes returned by LTI select view
 
 ## [3.17.1] - 2021-03-26
 
@@ -735,7 +793,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Minor fixes and improvements on features and tests
 
-[unreleased]: https://github.com/openfun/marsha/compare/v3.17.0...master
+[unreleased]: https://github.com/openfun/marsha/compare/v3.20.1...master
+[3.20.1]: https://github.com/openfun/marsha/compare/v3.20.0...v3.20.1
+[3.20.0]: https://github.com/openfun/marsha/compare/v3.19.0...v3.20.0
+[3.19.0]: https://github.com/openfun/marsha/compare/v3.18.0...v3.19.0
+[3.18.0]: https://github.com/openfun/marsha/compare/v3.17.1...v3.18.0
+[3.17.1]: https://github.com/openfun/marsha/compare/v3.17.0...v3.17.1
 [3.17.0]: https://github.com/openfun/marsha/compare/v3.16.1...v3.17.0
 [3.16.1]: https://github.com/openfun/marsha/compare/v3.16.0...v3.16.1
 [3.16.0]: https://github.com/openfun/marsha/compare/v3.15.0...v3.16.0

@@ -1,27 +1,17 @@
 import { Box } from 'grommet';
-import 'plyr/dist/plyr.css';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Redirect } from 'react-router';
 
+import { WaitingLiveVideo } from '../WaitingLiveVideo';
 import { useThumbnail } from '../../data/stores/useThumbnail';
-import { useTimedTextTrack } from '../../data/stores/useTimedTextTrack';
 import { useTimedTextTrackLanguageChoices } from '../../data/stores/useTimedTextTrackLanguageChoices';
-import { useVideo } from '../../data/stores/useVideo';
 import { useVideoProgress } from '../../data/stores/useVideoProgress';
 import { createPlayer } from '../../Player/createPlayer';
-import {
-  timedTextMode,
-  TimedTextTranscript,
-  Video,
-  videoSize,
-} from '../../types/tracks';
+import { TimedText, timedTextMode, Video, videoSize } from '../../types/tracks';
 import { VideoPlayerInterface } from '../../types/VideoPlayer';
-import { Maybe, Nullable } from '../../utils/types';
-import { Chat } from '../Chat';
-import { DownloadVideo } from '../DownloadVideo';
+import { useAsyncEffect } from '../../utils/useAsyncEffect';
+import { Nullable } from '../../utils/types';
 import { FULL_SCREEN_ERROR_ROUTE } from '../ErrorComponents/route';
-import { Transcripts } from '../Transcripts';
-import './VideoPlayer.css'; // Improve some plyr styles
 
 const trackTextKind: { [key in timedTextMode]?: string } = {
   [timedTextMode.CLOSED_CAPTIONING]: 'captions',
@@ -31,26 +21,22 @@ const trackTextKind: { [key in timedTextMode]?: string } = {
 interface BaseVideoPlayerProps {
   video: Nullable<Video>;
   playerType: string;
+  timedTextTracks: TimedText[];
 }
 
 const VideoPlayer = ({
-  video: baseVideo,
+  video,
   playerType,
+  timedTextTracks,
 }: BaseVideoPlayerProps) => {
-  const [player, setPlayer] = useState(
-    undefined as Maybe<VideoPlayerInterface>,
-  );
+  const [player, setPlayer] = useState<VideoPlayerInterface>();
   const videoNodeRef = useRef(null as Nullable<HTMLVideoElement>);
 
   const { choices, getChoices } = useTimedTextTrackLanguageChoices(
     (state) => state,
   );
 
-  const video = useVideo((state) => state.getVideo(baseVideo));
   const thumbnail = useThumbnail((state) => state.getThumbnail());
-  const timedTextTracks = useTimedTextTrack((state) =>
-    state.getTimedTextTracks(),
-  );
 
   const setPlayerCurrentTime = useVideoProgress(
     (state) => state.setPlayerCurrentTime,
@@ -68,16 +54,16 @@ const VideoPlayer = ({
     {};
 
   /**
-   * Initialize the `Plyr` video player and our adaptive bitrate library if applicable.
-   * Noop out if the video or jwt is missing, render will redirect to an error page.
+   * Initialize the video player.
+   * Noop out if the video is missing, render will redirect to an error page.
    */
-  useEffect(() => {
+  useAsyncEffect(async () => {
     getChoices();
 
     if (video) {
-      // Instantiate Plyr and keep the instance in state
+      // Instantiate the player and keep the instance in state
       setPlayer(
-        createPlayer(
+        await createPlayer(
           playerType,
           videoNodeRef.current!,
           setPlayerCurrentTime,
@@ -102,14 +88,6 @@ const VideoPlayer = ({
   if (!video) {
     return <Redirect push to={FULL_SCREEN_ERROR_ROUTE('notFound')} />;
   }
-
-  const transcripts = timedTextTracks
-    .filter((track) => track.is_ready_to_show)
-    .filter((track) =>
-      video.has_transcript === false && video.should_use_subtitle_as_transcript
-        ? timedTextMode.SUBTITLE === track.mode
-        : timedTextMode.TRANSCRIPT === track.mode,
-    );
 
   const thumbnailUrls =
     (thumbnail && thumbnail.is_ready_to_show && thumbnail.urls) ||
@@ -157,11 +135,7 @@ const VideoPlayer = ({
             />
           ))}
       </video>
-      {video.show_download && <DownloadVideo urls={video.urls!} />}
-      {transcripts.length > 0 && (
-        <Transcripts transcripts={transcripts as TimedTextTranscript[]} />
-      )}
-      {video.live_state !== null && video.xmpp && <Chat xmpp={video.xmpp} />}
+      {!player && video.live_state && <WaitingLiveVideo />}
     </Box>
   );
 };

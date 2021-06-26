@@ -7,7 +7,6 @@ import VideoPlayer from '../components/VideoPlayer';
 import { createVideojsPlayer } from './createVideojsPlayer';
 import { liveState, timedTextMode, uploadState } from '../types/tracks';
 import { isMSESupported } from '../utils/isMSESupported';
-import { jestMockOf } from '../utils/types';
 import { videoMockFactory } from '../utils/tests/factories';
 import { wrapInIntlProvider } from '../utils/tests/intl';
 import { XAPIStatement } from '../XAPI/XAPIStatement';
@@ -21,7 +20,9 @@ jest.mock('../utils/isMSESupported', () => ({
   isMSESupported: jest.fn(),
 }));
 
-const mockIsMSESupported = isMSESupported as jestMockOf<typeof isMSESupported>;
+const mockIsMSESupported = isMSESupported as jest.MockedFunction<
+  typeof isMSESupported
+>;
 
 const mockVideo = videoMockFactory({
   id: 'video-test-videojs-instance',
@@ -56,11 +57,6 @@ const mockVideo = videoMockFactory({
 jest.mock('../data/appData', () => ({
   appData: {
     jwt: 'foo',
-    static: {
-      svg: {
-        plyr: '/static/svg/plyr.svg',
-      },
-    },
     video: mockVideo,
   },
   getDecodedJwt: jest.fn().mockImplementation(() => ({
@@ -74,6 +70,13 @@ jest.mock('../index', () => ({
   },
 }));
 
+jest.mock('../data/stores/useTimedTextTrackLanguageChoices', () => ({
+  useTimedTextTrackLanguageChoices: () => ({
+    getChoices: jest.fn(),
+    choices: [],
+  }),
+}));
+
 describe('createVideoJsPlayer', () => {
   const XAPIStatementMocked = mocked(XAPIStatement);
   beforeEach(() => {
@@ -84,7 +87,11 @@ describe('createVideoJsPlayer', () => {
     mockIsMSESupported.mockReturnValue(true);
     const { container } = render(
       wrapInIntlProvider(
-        <VideoPlayer video={mockVideo} playerType={'videojs'} />,
+        <VideoPlayer
+          video={mockVideo}
+          playerType={'videojs'}
+          timedTextTracks={[]}
+        />,
       ),
     );
 
@@ -102,15 +109,9 @@ describe('createVideoJsPlayer', () => {
     ]);
 
     expect(player.options_.playbackRates).toEqual([
-      0.5,
-      0.75,
-      1,
-      1.25,
-      1.5,
-      1.75,
-      2,
-      4,
+      0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 4,
     ]);
+    expect(player.options_.autoplay).toBe(false);
     expect(player.options_.controls).toBe(true);
     expect(player.options_.debug).toBe(false);
     expect(player.options_.fluid).toBe(true);
@@ -132,7 +133,11 @@ describe('createVideoJsPlayer', () => {
     mockIsMSESupported.mockReturnValue(false);
     const { container } = render(
       wrapInIntlProvider(
-        <VideoPlayer video={mockVideo} playerType={'videojs'} />,
+        <VideoPlayer
+          video={mockVideo}
+          playerType={'videojs'}
+          timedTextTracks={[]}
+        />,
       ),
     );
 
@@ -174,14 +179,7 @@ describe('createVideoJsPlayer', () => {
     ]);
 
     expect(player.options_.playbackRates).toEqual([
-      0.5,
-      0.75,
-      1,
-      1.25,
-      1.5,
-      1.75,
-      2,
-      4,
+      0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 4,
     ]);
     expect(player.options_.controls).toBe(true);
     expect(player.options_.debug).toBe(false);
@@ -218,7 +216,13 @@ describe('createVideoJsPlayer', () => {
       live_state: liveState.RUNNING,
     });
     const { container } = render(
-      wrapInIntlProvider(<VideoPlayer video={video} playerType={'videojs'} />),
+      wrapInIntlProvider(
+        <VideoPlayer
+          video={video}
+          playerType={'videojs'}
+          timedTextTracks={[]}
+        />,
+      ),
     );
 
     const videoElement = container.querySelector('video');
@@ -233,13 +237,19 @@ describe('createVideoJsPlayer', () => {
     expect(player.currentSources()).toEqual([
       { type: 'application/x-mpegURL', src: 'https://example.com/hls' },
     ]);
+    expect(player.options_.autoplay).toBe(true);
     expect(player.options_.liveui).toBe(true);
+    expect(player.options_.playbackRates).toEqual([]);
   });
 
   it('sends xapi events', () => {
     const { container } = render(
       wrapInIntlProvider(
-        <VideoPlayer video={mockVideo} playerType={'videojs'} />,
+        <VideoPlayer
+          video={mockVideo}
+          playerType={'videojs'}
+          timedTextTracks={[]}
+        />,
       ),
     );
 

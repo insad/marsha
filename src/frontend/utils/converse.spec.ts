@@ -5,7 +5,14 @@ jest.mock('./window', () => ({
   converse: {
     initialize: jest.fn(),
     insertInto: jest.fn(),
+    plugins: {
+      add: jest.fn(),
+    },
   },
+}));
+let mockDecodedJwtToken = {};
+jest.mock('../data/appData', () => ({
+  getDecodedJwt: () => mockDecodedJwtToken,
 }));
 
 describe('converseMounter', () => {
@@ -14,6 +21,11 @@ describe('converseMounter', () => {
   });
 
   it('initializes once converse.js', () => {
+    mockDecodedJwtToken = {
+      user: {
+        username: 'jane_doe',
+      },
+    };
     document.body.innerHTML = '<div id="converse-container"></div>';
 
     const xmpp = {
@@ -29,6 +41,7 @@ describe('converseMounter', () => {
     // The converse mounter is initialized and converse has not been initialized nor inserted.
     expect(mockWindow.converse.initialize).not.toHaveBeenCalled();
     expect(mockWindow.converse.insertInto).not.toHaveBeenCalled();
+    expect(mockWindow.converse.plugins.add).not.toHaveBeenCalled();
 
     // first call, converse is initialized
     converseManager('#converse-container', xmpp);
@@ -52,8 +65,12 @@ describe('converseMounter', () => {
       hide_muc_participants: true,
       jid: 'xmpp-server.com',
       modtools_disable_assign: true,
+      muc_instant_rooms: false,
+      nickname: 'jane_doe',
       root: expect.any(HTMLDivElement),
+      show_client_info: false,
       singleton: true,
+      theme: 'concord',
       view_mode: 'embedded',
       visible_toolbar_buttons: {
         call: false,
@@ -61,6 +78,11 @@ describe('converseMounter', () => {
         spoiler: false,
         toggle_occupants: false,
       },
+      whitelisted_plugins: ['marsha'],
+    });
+    expect(mockWindow.converse.plugins.add).toHaveBeenCalledTimes(1);
+    expect(mockWindow.converse.plugins.add).toHaveBeenCalledWith('marsha', {
+      initialize: expect.any(Function),
     });
     expect(mockWindow.converse.insertInto).not.toHaveBeenCalled();
 
@@ -69,5 +91,6 @@ describe('converseMounter', () => {
 
     expect(mockWindow.converse.initialize).toHaveBeenCalledTimes(1);
     expect(mockWindow.converse.insertInto).toHaveBeenCalledTimes(1);
+    expect(mockWindow.converse.plugins.add).toHaveBeenCalledTimes(1);
   });
 });

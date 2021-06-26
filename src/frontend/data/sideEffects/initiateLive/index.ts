@@ -1,5 +1,5 @@
 import { API_ENDPOINT } from '../../../settings';
-import { Video } from '../../../types/tracks';
+import { LiveModeType, Video } from '../../../types/tracks';
 import { appData } from '../../appData';
 
 /**
@@ -7,7 +7,10 @@ import { appData } from '../../appData';
  * Returns the updated video
  * @param video initiate a live mode on this video
  */
-export const initiateLive = async (video: Video): Promise<Video> => {
+export const initiateLive = async (
+  video: Video,
+  type: LiveModeType,
+): Promise<Video> => {
   const response = await fetch(
     `${API_ENDPOINT}/videos/${video.id}/initiate-live/`,
     {
@@ -16,11 +19,14 @@ export const initiateLive = async (video: Video): Promise<Video> => {
         'Content-Type': 'application/json',
       },
       method: 'POST',
+      body: JSON.stringify({
+        type,
+      }),
     },
   );
 
   if (!response.ok) {
-    throw new Error(`Failed to initialite a live mode for video ${video.id}.`);
+    throw new Error(`Failed to initialize a live mode for video ${video.id}.`);
   }
 
   return await response.json();

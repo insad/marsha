@@ -52,8 +52,18 @@ export enum timedTextMode {
 }
 
 export interface Playlist {
-  title: string;
+  consumer_site: string;
+  created_by: Nullable<string>;
+  duplicated_from: Nullable<string>;
+  id: string;
+  is_portable_to_playlist: boolean;
+  is_portable_to_consumer_site: boolean;
+  is_public: boolean;
   lti_id: string;
+  organization: string;
+  portable_to: [];
+  title: string;
+  users: string[];
 }
 
 /* XMPP representation */
@@ -104,6 +114,11 @@ export interface VideoUrls {
   thumbnails: Partial<urls>;
 }
 
+export enum LiveModeType {
+  RAW = 'raw',
+  JITSI = 'jitsi',
+}
+
 /** A Video record as it exists on the backend. */
 export interface Video extends Resource {
   description: string;
@@ -125,7 +140,14 @@ export interface Video extends Resource {
         endpoints: string[];
       };
     };
+    jitsi?: {
+      external_api_url?: string;
+      domain?: string;
+      config_overwrite: JitsiMeetExternalAPI.ConfigOverwriteOptions;
+      interface_config_overwrite: JitsiMeetExternalAPI.InterfaceConfigOverwrtieOptions;
+    };
   };
+  live_type: Nullable<LiveModeType>;
   xmpp: Nullable<XMPP>;
 }
 

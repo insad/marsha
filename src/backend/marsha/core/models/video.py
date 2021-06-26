@@ -5,7 +5,7 @@ from django.db import models
 from django.utils.functional import lazy
 from django.utils.translation import gettext_lazy as _
 
-from ..defaults import HARVESTED, LIVE_CHOICES, RUNNING
+from ..defaults import DELETED, HARVESTED, LIVE_CHOICES, LIVE_TYPE_CHOICES
 from ..utils.time_utils import to_timestamp
 from .base import BaseModel
 from .file import AbstractImage, BaseFile, UploadableFileMixin
@@ -45,6 +45,14 @@ class Video(BaseFile):
         null=True,
         blank=True,
     )
+    live_type = models.CharField(
+        max_length=20,
+        verbose_name=_("type of live"),
+        help_text=_("type of live."),
+        choices=LIVE_TYPE_CHOICES,
+        null=True,
+        blank=True,
+    )
 
     is_public = models.BooleanField(
         default=False,
@@ -64,7 +72,15 @@ class Video(BaseFile):
                 fields=["lti_id", "playlist"],
                 condition=models.Q(deleted=None),
                 name="video_unique_idx",
-            )
+            ),
+            models.CheckConstraint(
+                name="live_type_check",
+                check=models.expressions.RawSQL(
+                    "(live_state IS NULL) = (live_type IS NULL)",
+                    {},
+                    models.fields.BooleanField(),
+                ),
+            ),
         ]
 
     def get_source_s3_key(self, stamp=None):
@@ -110,6 +126,7 @@ class Video(BaseFile):
             # reset live state and info
             self.live_state = None
             self.live_info = None
+            self.live_type = None
 
         super().update_upload_state(upload_state, uploaded_on, **extra_parameters)
 
@@ -121,8 +138,9 @@ class Video(BaseFile):
         `uploaded_on` field but it is necessary for conveniency and clarity in the client.
         """
         return (
-            self.uploaded_on is not None and self.upload_state != HARVESTED
-        ) or self.live_state == RUNNING
+            self.uploaded_on is not None
+            and self.upload_state not in [HARVESTED, DELETED]
+        ) or self.live_state is not None
 
     @staticmethod
     def get_ready_clause():
@@ -137,7 +155,7 @@ class Video(BaseFile):
             A condition added to a QuerySet
         """
         return models.Q(uploaded_on__isnull=False, live_state__isnull=True) | models.Q(
-            live_state="running"
+            live_state__isnull=False
         )
 
 

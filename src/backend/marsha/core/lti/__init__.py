@@ -1,17 +1,17 @@
 """LTI module that supports LTI 1.0."""
 import re
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.http.request import validate_host
 from django.utils.datastructures import MultiValueDictKeyError
 
-from oauthlib import oauth1
 from pylti.common import LTIException, verify_request_common
 
 from ..models import ConsumerSite
 from ..models.account import ADMINISTRATOR, INSTRUCTOR, LTI_ROLES, STUDENT, LTIPassport
+from ..utils.url_utils import build_absolute_uri_behind_proxy
 
 
 class LTI:
@@ -87,9 +87,7 @@ class LTI:
         # calculated by our LTI consumer.
         # Note that this is normally done in pylti's "verify_request_common" method but it does
         # not support WSGI normalized headers so let's do it ourselves.
-        url = self.request.build_absolute_uri()
-        if self.request.META.get("HTTP_X_FORWARDED_PROTO", "http") == "https":
-            url = url.replace("http:", "https:", 1)
+        url = build_absolute_uri_behind_proxy(self.request)
 
         # A call to the verification function should raise an LTIException but
         # we can further check that it returns True.
@@ -217,38 +215,6 @@ class LTI:
             "course_run": None,
         }
 
-    def sign_post_request(self, url, lti_parameters):
-        """Sign a request by adding all oauth parameters."""
-        passport = self.get_passport()
-
-        client = oauth1.Client(
-            client_key=passport.oauth_consumer_key, client_secret=passport.shared_secret
-        )
-        # Compute Authorization header which looks like:
-        # Authorization: OAuth oauth_nonce="80966668944732164491378916897",
-        # oauth_timestamp="1378916897", oauth_version="1.0", oauth_signature_method="HMAC-SHA1",
-        # oauth_consumer_key="", oauth_signature="frVp4JuvT1mVXlxktiAUjQ7%2F1cw%3D"
-        _uri, headers, _body = client.sign(
-            url,
-            http_method="POST",
-            body=lti_parameters,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-
-        # Parse headers to pass to template as part of context:
-        oauth_dict = dict(
-            param.strip().replace('"', "").split("=")
-            for param in headers["Authorization"].split(",")
-        )
-
-        signature = oauth_dict["oauth_signature"]
-        oauth_dict["oauth_signature"] = unquote(signature)
-        oauth_dict["oauth_nonce"] = oauth_dict.pop("OAuth oauth_nonce")
-
-        lti_parameters.update(oauth_dict)
-
-        return lti_parameters
-
     @property
     def resource_link_title(self):
         """Return the resource link id as default for its title."""
@@ -346,6 +312,24 @@ class LTI:
 
         """
         return self.request.POST.get("launch_presentation_locale", "en")
+
+    @property
+    def username(self):
+        """Username of the authenticated user.
+
+        Returns
+        -------
+        string
+            The username of the authenticated user.
+        """
+        return self.request.POST.get("lis_person_sourcedid") or self.request.POST.get(
+            "ext_user_username"
+        )
+
+    @property
+    def email(self):
+        """Email of the authenticated user."""
+        return self.request.POST.get("lis_person_contact_email_primary")
 
 
 class LTIUser:

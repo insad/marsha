@@ -11,14 +11,14 @@ from django.db.models import Q
 from django.utils import timezone
 
 import requests
-from rest_framework import mixins, viewsets
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.models import TokenUser
 
-from . import defaults, forms, permissions, serializers
+from . import defaults, forms, permissions, serializers, storage
 from .lti import LTIUser
 from .models import Document, Organization, Playlist, Thumbnail, TimedTextTrack, Video
 from .utils.api_utils import validate_signature
@@ -227,7 +227,7 @@ def update_state(request):
     return Response({"success": True})
 
 
-class VideoViewSet(viewsets.ModelViewSet):
+class VideoViewSet(ObjectPkMixin, viewsets.ModelViewSet):
     """Viewset for the API of the video object."""
 
     queryset = Video.objects.all()
@@ -241,9 +241,18 @@ class VideoViewSet(viewsets.ModelViewSet):
         Default to the actions' self defined permissions if applicable or
         to the ViewSet's default permissions.
         """
-        if self.action in ["retrieve", "partial_update", "update"]:
+        if self.action in ["partial_update", "update"]:
             permission_classes = [
-                permissions.IsResourceAdmin | permissions.IsResourceInstructor
+                permissions.IsTokenResourceRouteObject & permissions.IsTokenInstructor
+                | permissions.IsTokenResourceRouteObject & permissions.IsTokenAdmin
+                | permissions.IsVideoPlaylistAdmin
+                | permissions.IsVideoOrganizationAdmin
+            ]
+        elif self.action in ["retrieve"]:
+            permission_classes = [
+                permissions.IsTokenResourceRouteObject
+                | permissions.IsVideoPlaylistAdmin
+                | permissions.IsVideoOrganizationAdmin
             ]
         elif self.action in ["list"]:
             permission_classes = [IsAuthenticated]
@@ -275,8 +284,7 @@ class VideoViewSet(viewsets.ModelViewSet):
 
         user = self.request.user
         if isinstance(user, TokenUser):
-            context["roles"] = user.token.payload.get("roles", [])
-            context["user_id"] = user.token.payload.get("user_id", None)
+            context.update(user.token.payload)
 
         return context
 
@@ -324,15 +332,18 @@ class VideoViewSet(viewsets.ModelViewSet):
         detail=True,
         url_path="initiate-upload",
         permission_classes=[
-            permissions.IsResourceAdmin | permissions.IsResourceInstructor
+            permissions.IsTokenResourceRouteObject & permissions.IsTokenInstructor
+            | permissions.IsTokenResourceRouteObject & permissions.IsTokenAdmin
+            | permissions.IsVideoPlaylistAdmin
+            | permissions.IsVideoOrganizationAdmin
         ],
     )
     # pylint: disable=unused-argument
-    def initate_upload(self, request, pk=None):
+    def initiate_upload(self, request, pk=None):
         """Get an upload policy for a video.
 
         Calling the endpoint resets the upload state to `pending` and returns an upload policy to
-        our AWS S3 source bucket.
+        selected video backend.
 
         Parameters
         ----------
@@ -344,35 +355,23 @@ class VideoViewSet(viewsets.ModelViewSet):
         Returns
         -------
         Type[rest_framework.response.Response]
-            HttpResponse carrying the AWS S3 upload policy as a JSON object.
+            HttpResponse carrying the upload policy as a JSON object.
 
         """
-        now = timezone.now()
-        stamp = to_timestamp(now)
-
-        video = self.get_object()
-        key = video.get_source_s3_key(stamp=stamp)
-
-        presigned_post = create_presigned_post(
-            [
-                ["starts-with", "$Content-Type", "video/"],
-                ["content-length-range", 0, settings.VIDEO_SOURCE_MAX_SIZE],
-            ],
-            {},
-            key,
-        )
+        response = storage.get_initiate_backend().initiate_video_upload(request, pk)
 
         # Reset the upload state of the video
         Video.objects.filter(pk=pk).update(upload_state=defaults.PENDING)
 
-        return Response(presigned_post)
+        return Response(response)
 
     @action(
         methods=["post"],
         detail=True,
         url_path="initiate-live",
         permission_classes=[
-            permissions.IsResourceAdmin | permissions.IsResourceInstructor
+            permissions.IsTokenResourceRouteObject & permissions.IsTokenInstructor
+            | permissions.IsTokenResourceRouteObject & permissions.IsTokenAdmin
         ],
     )
     # pylint: disable=unused-argument
@@ -395,6 +394,11 @@ class VideoViewSet(viewsets.ModelViewSet):
         Type[rest_framework.response.Response]
             HttpResponse with the serialized video.
         """
+        serializer = serializers.InitLiveStateSerializer(data=request.data)
+
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
         now = timezone.now()
         stamp = to_timestamp(now)
 
@@ -405,6 +409,7 @@ class VideoViewSet(viewsets.ModelViewSet):
 
         Video.objects.filter(pk=pk).update(
             live_info=live_info,
+            live_type=serializer.validated_data["type"],
             upload_state=defaults.PENDING,
             live_state=defaults.CREATING,
             uploaded_on=None,
@@ -420,7 +425,8 @@ class VideoViewSet(viewsets.ModelViewSet):
         detail=True,
         url_path="start-live",
         permission_classes=[
-            permissions.IsResourceAdmin | permissions.IsResourceInstructor
+            permissions.IsTokenResourceRouteObject & permissions.IsTokenInstructor
+            | permissions.IsTokenResourceRouteObject & permissions.IsTokenAdmin
         ],
     )
     # pylint: disable=unused-argument
@@ -469,7 +475,8 @@ class VideoViewSet(viewsets.ModelViewSet):
         detail=True,
         url_path="stop-live",
         permission_classes=[
-            permissions.IsResourceAdmin | permissions.IsResourceInstructor
+            permissions.IsTokenResourceRouteObject & permissions.IsTokenInstructor
+            | permissions.IsTokenResourceRouteObject & permissions.IsTokenAdmin
         ],
     )
     # pylint: disable=unused-argument
@@ -591,19 +598,23 @@ class VideoViewSet(viewsets.ModelViewSet):
 
 
 class DocumentViewSet(
-    mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.GenericViewSet
+    ObjectPkMixin,
+    mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    viewsets.GenericViewSet,
 ):
     """Viewset for the API of the Document object."""
 
     queryset = Document.objects.all()
     serializer_class = serializers.DocumentSerializer
     permission_classes = [
-        permissions.IsResourceAdmin | permissions.IsResourceInstructor
+        permissions.IsTokenResourceRouteObject & permissions.IsTokenInstructor
+        | permissions.IsTokenResourceRouteObject & permissions.IsTokenAdmin
     ]
 
     @action(methods=["post"], detail=True, url_path="initiate-upload")
     # pylint: disable=unused-argument
-    def initate_upload(self, request, pk=None):
+    def initiate_upload(self, request, pk=None):
         """Get an upload policy for a file.
 
         Calling the endpoint resets the upload state to `pending` and returns an upload policy to
@@ -649,27 +660,59 @@ class DocumentViewSet(
         return Response(presigned_post)
 
 
-class TimedTextTrackViewSet(viewsets.ModelViewSet):
+class TimedTextTrackViewSet(ObjectPkMixin, viewsets.ModelViewSet):
     """Viewset for the API of the TimedTextTrack object."""
 
+    permission_classes = [permissions.NotAllowed]
+    queryset = TimedTextTrack.objects.all()
     serializer_class = serializers.TimedTextTrackSerializer
 
     def get_permissions(self):
         """Instantiate and return the list of permissions that this view requires."""
         if self.action == "metadata":
             permission_classes = [permissions.IsVideoToken]
+        elif self.action in ["create", "list"]:
+            permission_classes = [
+                permissions.IsTokenInstructor
+                | permissions.IsTokenAdmin
+                | permissions.IsParamsVideoAdminThroughOrganization
+                | permissions.IsParamsVideoAdminThroughPlaylist
+            ]
         else:
             permission_classes = [
-                permissions.IsVideoRelatedAdmin | permissions.IsVideoRelatedInstructor
+                permissions.IsTokenResourceRouteObjectRelatedVideo
+                & permissions.IsTokenInstructor
+                | permissions.IsTokenResourceRouteObjectRelatedVideo
+                & permissions.IsTokenAdmin
+                | permissions.IsRelatedVideoPlaylistAdmin
+                | permissions.IsRelatedVideoOrganizationAdmin
             ]
         return [permission() for permission in permission_classes]
 
-    def get_queryset(self):
-        """Restrict list access to timed text tracks related to the video in the JWT token."""
+    def list(self, request, *args, **kwargs):
+        """List timed text tracks through the API."""
+        queryset = self.get_queryset()
+        # If the "user" is just representing a resource and not an actual user profile, restrict
+        # the queryset to tracks linked to said resource
         user = self.request.user
-        if isinstance(user, TokenUser):
-            return TimedTextTrack.objects.filter(video__id=user.id)
-        return TimedTextTrack.objects.none()
+        if isinstance(user, TokenUser) and (
+            not user.token.get("user")
+            or user.token.get("user", {}).get("id") != user.token.get("resource_id")
+        ):
+            queryset = queryset.filter(video__id=user.id)
+
+        # Apply the video filter if appropriate
+        video = request.query_params.get("video")
+        if video is not None:
+            queryset = queryset.filter(video__id=video)
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
     @action(methods=["post"], detail=True, url_path="initiate-upload")
     # pylint: disable=unused-argument
@@ -711,6 +754,7 @@ class TimedTextTrackViewSet(viewsets.ModelViewSet):
 
 
 class ThumbnailViewSet(
+    ObjectPkMixin,
     mixins.CreateModelMixin,
     mixins.DestroyModelMixin,
     mixins.RetrieveModelMixin,
@@ -718,10 +762,23 @@ class ThumbnailViewSet(
 ):
     """Viewset for the API of the Thumbnail object."""
 
-    permission_classes = [
-        permissions.IsVideoRelatedInstructor | permissions.IsVideoRelatedAdmin
-    ]
+    permission_classes = [permissions.NotAllowed]
     serializer_class = serializers.ThumbnailSerializer
+
+    def get_permissions(self):
+        """Instantiate and return the list of permissions that this view requires."""
+        if self.action == "create":
+            permission_classes = [
+                permissions.IsTokenInstructor | permissions.IsTokenAdmin
+            ]
+        else:
+            permission_classes = [
+                permissions.IsTokenResourceRouteObjectRelatedVideo
+                & permissions.IsTokenInstructor
+                | permissions.IsTokenResourceRouteObjectRelatedVideo
+                & permissions.IsTokenAdmin
+            ]
+        return [permission() for permission in permission_classes]
 
     def get_queryset(self):
         """Restrict list access to thumbnail related to the video in the JWT token."""

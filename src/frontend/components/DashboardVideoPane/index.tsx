@@ -8,10 +8,9 @@ import { appData } from '../../data/appData';
 import { useVideo } from '../../data/stores/useVideo';
 import { API_ENDPOINT } from '../../settings';
 import { modelName } from '../../types/models';
-import { uploadState, Video } from '../../types/tracks';
+import { uploadState, LiveModeType, Video } from '../../types/tracks';
 import { report } from '../../utils/errors/report';
 import { DashboardInternalHeading } from '../Dashboard/DashboardInternalHeading';
-import { DashboardObjectProgress } from '../DashboardObjectProgress';
 import { DashboardPaneButtons } from '../DashboardPaneButtons';
 import { DashboardThumbnail } from '../DashboardThumbnail';
 import { DashboardVideoHarvested } from '../DashboardVideoHarvested';
@@ -20,17 +19,11 @@ import { DashboardVideoPaneDownloadOption } from '../DashboardVideoPaneDownloadO
 import { DashboardVideoPaneTranscriptOption } from '../DashboardVideoPaneTranscriptOption';
 import { FULL_SCREEN_ERROR_ROUTE } from '../ErrorComponents/route';
 import { ObjectStatusPicker } from '../ObjectStatusPicker';
+import { UploadableObjectProgress } from '../UploadableObjectProgress';
 import { UploadManagerStatus, useUploadManager } from '../UploadManager';
 
-const {
-  DELETED,
-  ERROR,
-  HARVESTED,
-  HARVESTING,
-  PENDING,
-  PROCESSING,
-  READY,
-} = uploadState;
+const { DELETED, ERROR, HARVESTED, HARVESTING, PENDING, PROCESSING, READY } =
+  uploadState;
 
 const messages = defineMessages({
   [DELETED]: {
@@ -162,7 +155,10 @@ export const DashboardVideoPane = ({ video }: DashboardVideoPaneProps) => {
           UploadManagerStatus.UPLOADING ||
           uploadManagerState[video.id]?.status === UploadManagerStatus.SUCCESS))
     ) {
-      const interval = window.setInterval(() => pollForVideo(), 1000 * 60);
+      const interval = window.setInterval(
+        () => pollForVideo(),
+        1000 * appData.uploadPollInterval,
+      );
 
       return () => {
         // As a matter of hygiene, stop the polling as we unmount
@@ -184,7 +180,11 @@ export const DashboardVideoPane = ({ video }: DashboardVideoPaneProps) => {
       if (video.live_state !== null) {
         return (
           <DashboardVideoPaneInnerContainer>
-            <Box direction={'row'}>
+            <Box
+              direction={
+                video.live_type === LiveModeType.RAW ? 'row' : 'column'
+              }
+            >
               <Box basis={'1/2'} margin={'small'}>
                 <CommonStatusLine video={video} />
               </Box>
@@ -200,7 +200,9 @@ export const DashboardVideoPane = ({ video }: DashboardVideoPaneProps) => {
         return (
           <DashboardVideoPaneInnerContainer>
             <CommonStatusLine video={video} />
-            <DashboardObjectProgress objectId={video.id} />
+            <Box margin={{ vertical: 'small' }}>
+              <UploadableObjectProgress objectId={video.id} />
+            </Box>
             {intl.formatMessage(messages.uploadingVideo)}
           </DashboardVideoPaneInnerContainer>
         );

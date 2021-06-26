@@ -11,6 +11,7 @@ export enum appState {
 export enum flags {
   VIDEO_LIVE = 'video_live',
   SENTRY = 'sentry',
+  JITSI = 'jitsi',
 }
 
 export interface AppData {
@@ -34,11 +35,11 @@ export interface AppData {
   static: {
     svg: {
       icons: string;
-      plyr: string;
     };
   };
   player?: string;
   flags?: {
     [key in flags]?: boolean;
   };
+  uploadPollInterval: number;
 }
